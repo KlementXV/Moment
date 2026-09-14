@@ -201,6 +201,9 @@ fort potentiel sur le critère Innovation / X-factor, et cohérent avec le narra
 
 ## 8. Confidentialité des images et serveur de clés
 
+> **Décision provisoire — à réexaminer (§15.1).** Le schéma ci-dessous est retenu
+> pour pouvoir avancer, mais l'arbitrage sur la garde des clés n'est pas figé.
+
 ### 8.1 Le problème
 
 Sans chiffrement, les images seraient lisibles par n'importe qui, y compris des
@@ -361,3 +364,59 @@ manque, on coupe par la fin sans casser ce qui précède.
   l'écran et constater qu'il est illisible sans clé.
 - La provenance vérifiable en direct par divulgation sélective (§8.3) :
   clé révélée → déchiffrement → hash → comparaison au commitment on-chain.
+
+## 15. Questions ouvertes
+
+### 15.1 Garde des clés de déchiffrement
+
+**Statut : à trancher. Le schéma du §8 est retenu par défaut pour ne pas bloquer
+l'implémentation, mais la décision reste ouverte.**
+
+Ce qui est acquis et ne se rediscute pas : les images doivent être chiffrées.
+Sans chiffrement, les CID inscrits on-chain rendent toutes les photos aspirables
+par n'importe qui, ce qui est incompatible avec le produit.
+
+Ce qui reste ouvert : **qui détient la capacité de déchiffrer**.
+
+| Option | Confidentialité réelle | Coût | Défaut principal |
+|---|---|---|---|
+| Serveur de clés (retenu par défaut, §8) | Oui vis-à-vis des non-membres | ~1 j | L'opérateur peut tout déchiffrer |
+| Déchiffrement à seuil (type Lit Protocol) | Oui, sans tiers unique | Élevé, risqué | SDK orienté JS, intégration Kotlin incertaine |
+| Clé en dur dans l'app | Non (dépôt public) | Nul | Cassable en minutes ; indéfendable devant ce jury |
+| Feed public assumé, sans chiffrement | Aucune | Nul | Jeu de données de visages ouvert et permanent |
+
+Points à peser au moment de trancher :
+
+- Le serveur de clés fait perdre l'argument « zéro serveur », mais permet un
+  modèle de menace explicite — probablement mieux reçu par un jury comptant deux
+  chercheurs en sécurité qu'une solution naïve présentée comme sûre.
+- Le déchiffrement à seuil est le seul choix qui supprime le tiers de confiance.
+  Il ne doit être tenté que hors du chemin critique : si l'intégration échoue en
+  semaine 3, il faut pouvoir retomber sur le serveur de clés sans rien casser.
+- L'architecture du §8 est conçue pour que ce basculement reste local : seule la
+  source des clés change, ni le chiffrement client, ni le format des blobs, ni le
+  modèle on-chain ne bougent.
+
+Échéance : à décider avant le début de la semaine 2 (c'est là que le chiffrement
+et le serveur de clés sont implémentés). Aucun travail de la semaine 1 n'en
+dépend.
+
+### 15.2 Paramètres économiques
+
+Les valeurs de `min_stake`, `reward_rate_bps`, `reward_cap`, `decay_bps` et
+`max_decay_days` ne sont pas arrêtées. `decay_bps = 5000` (-50 %) est posé par la
+vision produit ; les autres sont à calibrer.
+
+Ils vivent dans `Config` et sont modifiables par l'admin sans redéploiement : ce
+choix est délibéré pour que le calibrage puisse attendre les premiers essais
+réels plutôt que de bloquer l'implémentation.
+
+À vérifier lors du calibrage : qu'un utilisateur régulier voie son solde croître
+de façon perceptible sur la durée d'une démo, sans que le pool ne se vide en
+quelques jours.
+
+### 15.3 Faisabilité du Seed Vault
+
+Le SDK Seed Vault est peu documenté. Prévu en semaine 3 et traité comme un bonus :
+un prototype court tôt dans le projet permettra de savoir s'il faut y consacrer du
+temps ou l'abandonner, avant qu'il ne coûte des jours en fin de parcours.
