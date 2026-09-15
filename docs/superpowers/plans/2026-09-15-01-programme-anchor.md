@@ -2068,7 +2068,11 @@ fn reap_then_check_in_the_same_day_does_not_decay_twice() {
     ctx.check_in(&user).unwrap();
 
     let profile = ctx.profile_state(&user.profile);
-    assert_eq!(profile.staked, after_reap, "aucun decay supplémentaire, pool vide donc aucune récompense");
+    // Aucun decay supplémentaire : seule la récompense, prise dans le pool que
+    // ce même profil vient d'alimenter, s'ajoute.
+    let pool_before_reward = 40 * SKR - after_reap;
+    let expected_reward = (after_reap / 100).min(SKR).min(pool_before_reward);
+    assert_eq!(profile.staked, after_reap + expected_reward);
     assert_eq!(profile.streak, 1);
 }
 

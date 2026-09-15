@@ -404,6 +404,24 @@ impl Ctx {
         self.send(&[instruction], &[&owner, &authority])
     }
 
+    /// Appelé par l'admin, qui n'est ni le propriétaire ni un bénéficiaire :
+    /// c'est bien un tiers qui déclenche le règlement.
+    pub fn reap(&mut self, owner: &Pubkey) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::Reap {
+                caller: self.admin.pubkey(),
+                owner: *owner,
+                config: self.config,
+                profile: self.profile_address(owner),
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::Reap {}.data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
     /// Wallet + profil + faucet : l'utilisateur type des tests suivants.
     pub fn new_user(&mut self) -> User {
         let user = self.new_wallet();

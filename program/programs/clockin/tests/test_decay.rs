@@ -48,10 +48,10 @@ fn beyond_max_decay_days_the_balance_is_wiped_into_the_pool() {
     ctx.check_in(&user).unwrap();
 
     ctx.warp_days(40);
-    assert!(ctx.check_in(&user).is_err());
-    assert_eq!(
-        ctx.profile_state(&user.profile).staked,
-        80 * SKR,
-        "une transaction échouée ne persiste aucun règlement : c'est reap qui purge (tâche 7)"
-    );
+    let owner = user.pubkey();
+    ctx.reap(&owner).unwrap();
+
+    assert_eq!(ctx.profile_state(&user.profile).staked, 0);
+    assert_eq!(ctx.config_state().pool_balance, 80 * SKR);
+    assert!(ctx.check_in(&user).is_err(), "il faut recharger pour rejouer");
 }

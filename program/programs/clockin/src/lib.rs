@@ -56,4 +56,8 @@ pub mod clockin {
     ) -> Result<()> {
         instructions::check_in::handle_check_in(ctx, day, commitment, blob_ref)
     }
+
+    pub fn reap(ctx: Context<Reap>) -> Result<()> {
+        instructions::reap::handle_reap(ctx)
+    }
 }
