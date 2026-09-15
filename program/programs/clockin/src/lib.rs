@@ -17,11 +17,7 @@ declare_id!("7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1");
 pub mod clockin {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        crate::instructions::initialize::handle_initialize(ctx)
-    }
-
-    pub fn increment(ctx: Context<Increment>) -> Result<()> {
-        crate::instructions::increment::handle_increment(ctx)
+    pub fn initialize_config(ctx: Context<InitializeConfig>, params: ConfigParams) -> Result<()> {
+        instructions::initialize_config::handle_initialize_config(ctx, params)
     }
 }

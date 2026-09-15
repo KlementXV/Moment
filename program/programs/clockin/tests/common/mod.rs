@@ -1,0 +1,222 @@
+#![allow(dead_code)]
+
+use {
+    anchor_lang::{
+        prelude::Pubkey,
+        solana_program::{instruction::Instruction, system_program},
+        AccountDeserialize, InstructionData, ToAccountMetas,
+    },
+    clockin::state::{CheckIn, Config, Profile},
+    litesvm::{types::TransactionResult, LiteSVM},
+    litesvm_token::{spl_token, CreateAssociatedTokenAccount, CreateMint},
+    solana_clock::Clock,
+    solana_keypair::Keypair,
+    solana_message::{Message, VersionedMessage},
+    solana_signer::Signer,
+    solana_transaction::versioned::VersionedTransaction,
+};
+
+/// Unité de travail : mint de test à 9 décimales.
+pub const SKR: u64 = 1_000_000_000;
+pub const MIN_STAKE: u64 = 10 * SKR;
+pub const FAUCET_AMOUNT: u64 = 100 * SKR;
+pub const DAY: i64 = 86_400;
+
+/// litesvm 0.10 embarque le runtime agave 3.1, qui ne charge pas les ELF SBPF v3
+/// produits par défaut par `anchor build`. Sans cette garde, l'échec est un
+/// `InvalidAccountData` opaque au chargement du programme.
+fn assert_sbpf_v0(program_bytes: &[u8]) {
+    let flags = u32::from_le_bytes(program_bytes[48..52].try_into().unwrap());
+    assert_eq!(
+        flags, 0,
+        "clockin.so est compilé en SBPF v{flags} : relance `anchor build --arch v0`"
+    );
+}
+
+pub struct User {
+    pub keypair: Keypair,
+    pub profile: Pubkey,
+    pub token_account: Pubkey,
+}
+
+impl User {
+    pub fn pubkey(&self) -> Pubkey {
+        self.keypair.pubkey()
+    }
+}
+
+pub struct Ctx {
+    pub svm: LiteSVM,
+    pub admin: Keypair,
+    /// Autorité de publication : co-signe `check_in` (D4).
+    pub authority: Keypair,
+    pub mint: Pubkey,
+    pub config: Pubkey,
+    pub vault: Pubkey,
+    pub admin_token: Option<Pubkey>,
+}
+
+impl Ctx {
+    /// Déploie le programme et crée le mint, sans initialiser la configuration.
+    pub fn empty() -> Ctx {
+        let mut svm = LiteSVM::new();
+        let program_bytes = include_bytes!(concat!(
+            env!("CARGO_TARGET_TMPDIR"),
+            "/../deploy/clockin.so"
+        ));
+        assert_sbpf_v0(program_bytes);
+        svm.add_program(clockin::id(), program_bytes).unwrap();
+
+        let admin = Keypair::new();
+        let authority = Keypair::new();
+        svm.airdrop(&admin.pubkey(), 100 * 1_000_000_000).unwrap();
+        svm.airdrop(&authority.pubkey(), 1_000_000_000).unwrap();
+
+        let (config, _) =
+            Pubkey::find_program_address(&[clockin::constants::CONFIG_SEED], &clockin::id());
+        let (vault, _) =
+            Pubkey::find_program_address(&[clockin::constants::VAULT_SEED], &clockin::id());
+
+        // L'autorité de mint est le PDA Config : seul le programme peut créer du SKR de test.
+        let mint = CreateMint::new(&mut svm, &admin)
+            .authority(&config)
+            .decimals(9)
+            .send()
+            .unwrap();
+
+        Ctx { svm, admin, authority, mint, config, vault, admin_token: None }
+    }
+
+    /// Déploie et initialise avec les paramètres de travail de la feuille de route.
+    pub fn new() -> Ctx {
+        let mut ctx = Ctx::empty();
+        ctx.initialize_config_with(|_| {}).unwrap();
+        ctx
+    }
+
+    pub fn initialize_config_with(
+        &mut self,
+        adjust: impl FnOnce(&mut clockin::instructions::ConfigParams),
+    ) -> TransactionResult {
+        let mut params = clockin::instructions::ConfigParams {
+            min_stake: MIN_STAKE,
+            reward_cap: SKR,
+            faucet_amount: FAUCET_AMOUNT,
+            withdrawal_delay_seconds: 172_800,
+            reward_rate_bps: 100,
+            decay_bps: 2500,
+            max_decay_days: 30,
+            faucet_enabled: true,
+        };
+        adjust(&mut params);
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::InitializeConfig {
+                admin: self.admin.pubkey(),
+                publication_authority: self.authority.pubkey(),
+                config: self.config,
+                skr_mint: self.mint,
+                vault: self.vault,
+                token_program: spl_token::ID,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::InitializeConfig { params }.data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
+    /// Envoie une transaction signée par `signers`, le premier payant les frais.
+    pub fn send(&mut self, instructions: &[Instruction], signers: &[&Keypair]) -> TransactionResult {
+        let payer = signers[0].pubkey();
+        let blockhash = self.svm.latest_blockhash();
+        let message = Message::new_with_blockhash(instructions, Some(&payer), &blockhash);
+        let tx = VersionedTransaction::try_new(VersionedMessage::Legacy(message), signers).unwrap();
+        let result = self.svm.send_transaction(tx);
+        // Deux transactions identiques dans le même blockhash seraient rejetées
+        // comme doublons : on force un nouveau blockhash après chaque envoi.
+        self.svm.expire_blockhash();
+        result
+    }
+
+    pub fn now(&self) -> i64 {
+        self.svm.get_sysvar::<Clock>().unix_timestamp
+    }
+
+    pub fn today(&self) -> i64 {
+        self.now().div_euclid(DAY)
+    }
+
+    /// Avance l'horloge de `days` jours et le slot en conséquence.
+    pub fn warp_days(&mut self, days: i64) {
+        self.warp_seconds(days * DAY);
+    }
+
+    pub fn warp_seconds(&mut self, seconds: i64) {
+        let mut clock = self.svm.get_sysvar::<Clock>();
+        clock.unix_timestamp += seconds;
+        clock.slot += (seconds.max(0) as u64) * 1000 / 400;
+        self.svm.set_sysvar(&clock);
+        self.svm.expire_blockhash();
+    }
+
+    pub fn config_state(&self) -> Config {
+        let account = self.svm.get_account(&self.config).expect("config absente");
+        Config::try_deserialize(&mut account.data.as_slice()).unwrap()
+    }
+
+    pub fn profile_state(&self, profile: &Pubkey) -> Profile {
+        let account = self.svm.get_account(profile).expect("profil absent");
+        Profile::try_deserialize(&mut account.data.as_slice()).unwrap()
+    }
+
+    pub fn check_in_state(&self, check_in: &Pubkey) -> CheckIn {
+        let account = self.svm.get_account(check_in).expect("check-in absent");
+        CheckIn::try_deserialize(&mut account.data.as_slice()).unwrap()
+    }
+
+    pub fn token_balance(&self, token_account: &Pubkey) -> u64 {
+        litesvm_token::get_spl_account::<spl_token::state::Account>(&self.svm, token_account)
+            .map(|account| account.amount)
+            .unwrap_or(0)
+    }
+
+    pub fn vault_balance(&self) -> u64 {
+        self.token_balance(&self.vault)
+    }
+
+    pub fn profile_address(&self, owner: &Pubkey) -> Pubkey {
+        Pubkey::find_program_address(
+            &[clockin::constants::PROFILE_SEED, owner.as_ref()],
+            &clockin::id(),
+        )
+        .0
+    }
+
+    pub fn check_in_address(&self, owner: &Pubkey, day: i64) -> Pubkey {
+        Pubkey::find_program_address(
+            &[clockin::constants::CHECKIN_SEED, owner.as_ref(), &day.to_le_bytes()],
+            &clockin::id(),
+        )
+        .0
+    }
+
+    /// Crée un wallet avec des lamports et un compte de tokens SKR vide.
+    /// Le profil et l'approvisionnement arrivent aux tâches 4 et 5.
+    pub fn new_wallet(&mut self) -> User {
+        let keypair = Keypair::new();
+        self.svm.airdrop(&keypair.pubkey(), 10 * 1_000_000_000).unwrap();
+        let owner = keypair.pubkey();
+        let profile = self.profile_address(&owner);
+        // Copies locales : `self.svm` est emprunté en mutable par le builder,
+        // donc on ne peut pas lire `self.mint` ni `self.admin` au même moment.
+        let admin = self.admin.insecure_clone();
+        let mint = self.mint;
+        let token_account = CreateAssociatedTokenAccount::new(&mut self.svm, &admin, &mint)
+            .owner(&owner)
+            .send()
+            .unwrap();
+        User { profile, keypair, token_account }
+    }
+}

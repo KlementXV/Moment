@@ -269,7 +269,16 @@ solana-transaction = "3.0.2"
 solana-signer = "3.0.0"
 solana-keypair = "3.0.1"
 solana-clock = "3.0"
-solana-instruction = "3.0"
+solana-pubkey = "3.0"
+solana-program-pack = "3.0"
+solana-system-interface = "2.0"
+```
+
+Étendre aussi la feature `idl-build` existante, sinon la génération d'IDL échoue sur
+`no associated item named DISCRIMINATOR found for struct anchor_spl::token::Mint` :
+
+```toml
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 ```
 
 - [ ] **Step 2 : Écrire le test de configuration**

@@ -1,5 +1,3 @@
-pub mod initialize;
-pub mod increment;
+pub mod initialize_config;
 
-pub use initialize::*;
-pub use increment::*;
+pub use initialize_config::*;
