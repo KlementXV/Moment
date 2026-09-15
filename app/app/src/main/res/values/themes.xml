@@ -1,0 +1,11 @@
+<resources>
+    <color name="moment_background">#080A0C</color>
+    <style name="Theme.Moment.Base" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/moment_background</item>
+        <item name="android:colorAccent">#8AEAC5</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:navigationBarColor">@color/moment_background</item>
+    </style>
+    <style name="Theme.Moment" parent="Theme.Moment.Base" />
+</resources>
