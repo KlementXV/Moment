@@ -2532,8 +2532,10 @@ fn the_spec_example_costs_exactly_one_missed_day() {
     assert_eq!(profile.exit_unlock_at, 0);
     // 60 SKR restants au wallet + 30 SKR récupérés (40 décimés une fois).
     assert_eq!(ctx.token_balance(&token_account), 90 * SKR);
-    assert_eq!(ctx.vault_balance(), 0);
+    // Le vault n'est pas vide : il garde le pool, soit les 10 SKR que ce même
+    // utilisateur vient de perdre et qui appartiennent désormais aux réguliers.
     assert_eq!(ctx.config_state().pool_balance, 10 * SKR);
+    assert_eq!(ctx.vault_balance(), ctx.config_state().pool_balance);
 }
 
 #[test]
@@ -2603,7 +2605,9 @@ fn a_third_party_can_finalize_but_only_the_owner_is_paid() {
 
     ctx.finalize_exit_as(&keeper.keypair.insecure_clone(), &owner, &owner_token).unwrap();
 
-    assert_eq!(ctx.token_balance(&owner_token), 100 * SKR);
+    // Aucun check-in pendant l'attente : les jours J et J+1 sont manqués, donc
+    // 40 SKR deviennent 22,5 SKR, versés au propriétaire et à personne d'autre.
+    assert_eq!(ctx.token_balance(&owner_token), 82_500_000_000);
     assert_eq!(ctx.token_balance(&keeper_token), keeper_before, "le keeper ne touche rien");
 }
 

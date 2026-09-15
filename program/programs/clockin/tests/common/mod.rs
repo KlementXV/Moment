@@ -454,6 +454,36 @@ impl Ctx {
         self.send(&[instruction], &[&signer])
     }
 
+    pub fn finalize_exit(&mut self, owner: &Pubkey, owner_token_account: &Pubkey) -> TransactionResult {
+        let admin = self.admin.insecure_clone();
+        self.finalize_exit_as(&admin, owner, owner_token_account)
+    }
+
+    pub fn finalize_exit_as(
+        &mut self,
+        caller: &Keypair,
+        owner: &Pubkey,
+        owner_token_account: &Pubkey,
+    ) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::FinalizeExit {
+                caller: caller.pubkey(),
+                owner: *owner,
+                config: self.config,
+                profile: self.profile_address(owner),
+                skr_mint: self.mint,
+                owner_token_account: *owner_token_account,
+                vault: self.vault,
+                token_program: spl_token::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::FinalizeExit {}.data(),
+        };
+        let caller = caller.insecure_clone();
+        self.send(&[instruction], &[&caller])
+    }
+
     /// Wallet + profil + faucet : l'utilisateur type des tests suivants.
     pub fn new_user(&mut self) -> User {
         let user = self.new_wallet();

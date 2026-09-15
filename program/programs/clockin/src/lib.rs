@@ -68,4 +68,8 @@ pub mod clockin {
     pub fn cancel_exit(ctx: Context<ExitRequest>) -> Result<()> {
         instructions::exit::handle_cancel_exit(ctx)
     }
+
+    pub fn finalize_exit(ctx: Context<FinalizeExit>) -> Result<()> {
+        instructions::exit::handle_finalize_exit(ctx)
+    }
 }
