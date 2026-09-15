@@ -127,6 +127,114 @@ impl Ctx {
         self.send(&[instruction], &[&admin])
     }
 
+    /// Compte de tokens de l'admin, créé à la demande une seule fois.
+    pub fn admin_token_account(&mut self) -> Pubkey {
+        if let Some(existing) = self.admin_token {
+            return existing;
+        }
+        let admin = self.admin.insecure_clone();
+        let mint = self.mint;
+        let owner = admin.pubkey();
+        let account = CreateAssociatedTokenAccount::new(&mut self.svm, &admin, &mint)
+            .owner(&owner)
+            .send()
+            .unwrap();
+        self.admin_token = Some(account);
+        account
+    }
+
+    /// Amorce le pool : approvisionne l'admin puis dépose dans le vault.
+    pub fn seed_pool(&mut self, amount: u64) -> TransactionResult {
+        let admin_token = self.admin_token_account();
+        self.mint_for_tests(&admin_token, amount);
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::SeedPool {
+                admin: self.admin.pubkey(),
+                config: self.config,
+                skr_mint: self.mint,
+                admin_token_account: admin_token,
+                vault: self.vault,
+                token_program: spl_token::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::SeedPool { amount }.data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
+    /// Écrit directement un solde de tokens dans un compte existant.
+    /// L'autorité de mint appartenant au programme, c'est le seul moyen pour un
+    /// test de fabriquer un solde arbitraire sans passer par le faucet métier.
+    pub fn mint_for_tests(&mut self, token_account: &Pubkey, amount: u64) {
+        use solana_program_pack::Pack;
+        let mut account = self
+            .svm
+            .get_account(token_account)
+            .expect("compte de tokens absent");
+        let length = spl_token::state::Account::LEN;
+        let mut state = spl_token::state::Account::unpack(&account.data[..length]).unwrap();
+        state.amount += amount;
+        spl_token::state::Account::pack(state, &mut account.data[..length]).unwrap();
+        self.svm.set_account(*token_account, account).unwrap();
+    }
+
+    pub fn update_config(
+        &mut self,
+        adjust: impl FnOnce(&mut clockin::instructions::ConfigParams),
+    ) -> TransactionResult {
+        let admin = self.admin.insecure_clone();
+        self.update_config_as(&admin, adjust)
+    }
+
+    pub fn update_config_as(
+        &mut self,
+        signer: &Keypair,
+        adjust: impl FnOnce(&mut clockin::instructions::ConfigParams),
+    ) -> TransactionResult {
+        let current = self.config_state();
+        let mut params = clockin::instructions::ConfigParams {
+            min_stake: current.min_stake,
+            reward_cap: current.reward_cap,
+            faucet_amount: current.faucet_amount,
+            withdrawal_delay_seconds: current.withdrawal_delay_seconds,
+            reward_rate_bps: current.reward_rate_bps,
+            decay_bps: current.decay_bps,
+            max_decay_days: current.max_decay_days,
+            faucet_enabled: current.faucet_enabled,
+        };
+        adjust(&mut params);
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::UpdateConfig {
+                admin: signer.pubkey(),
+                config: self.config,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::UpdateConfig { params }.data(),
+        };
+        let signer = signer.insecure_clone();
+        self.send(&[instruction], &[&signer])
+    }
+
+    pub fn set_publication_authority(&mut self, new_authority: &Pubkey) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::UpdateConfig {
+                admin: self.admin.pubkey(),
+                config: self.config,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::SetPublicationAuthority {
+                new_authority: *new_authority,
+            }
+            .data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
     /// Envoie une transaction signée par `signers`, le premier payant les frais.
     pub fn send(&mut self, instructions: &[Instruction], signers: &[&Keypair]) -> TransactionResult {
         let payer = signers[0].pubkey();

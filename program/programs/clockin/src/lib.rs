@@ -20,4 +20,19 @@ pub mod clockin {
     pub fn initialize_config(ctx: Context<InitializeConfig>, params: ConfigParams) -> Result<()> {
         instructions::initialize_config::handle_initialize_config(ctx, params)
     }
+
+    pub fn update_config(ctx: Context<UpdateConfig>, params: ConfigParams) -> Result<()> {
+        instructions::initialize_config::handle_update_config(ctx, params)
+    }
+
+    pub fn set_publication_authority(
+        ctx: Context<UpdateConfig>,
+        new_authority: Pubkey,
+    ) -> Result<()> {
+        instructions::initialize_config::handle_set_publication_authority(ctx, new_authority)
+    }
+
+    pub fn seed_pool(ctx: Context<SeedPool>, amount: u64) -> Result<()> {
+        instructions::initialize_config::handle_seed_pool(ctx, amount)
+    }
 }

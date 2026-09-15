@@ -16,6 +16,7 @@
 - `withdrawal_delay_seconds` = `172_800` en v1, figé à la demande de sortie même si la configuration change ensuite.
 - Valeurs de travail : `min_stake` = 10 SKR, `reward_rate_bps` = 100, `reward_cap` = 1 SKR, `decay_bps` = 2500, `max_decay_days` = 30, `faucet_amount` = 100 SKR. Mint de test à **9 décimales** : `1 SKR = 1_000_000_000` unités.
 - Un seul vault SPL contient les mises de tous les utilisateurs **et** le pool. Invariant permanent : `Σ profile.staked + config.pool_balance == solde du vault`.
+- **Anchor 1.2 : `CpiContext::new(program_id: Pubkey, accounts)`** prend l'identifiant du programme, pas son `AccountInfo`. Écrire `ctx.accounts.token_program.key()`, jamais `.to_account_info()` — l'erreur est un `E0308` peu parlant.
 - `decay` et `reward` calculent en `u128` puis repassent en `u64` ; aucun arrondi ne crée de tokens.
 - Aucun bonus n'est versé à l'appelant de `reap` en v1 (§6.4, phase 3).
 - Aucune sanction de modération on-chain en v1 (D3) : pas de compte `ModerationDay`, pas de débit de 10 %.
@@ -948,7 +949,7 @@ pub fn handle_seed_pool(ctx: Context<SeedPool>, amount: u64) -> Result<()> {
     let decimals = ctx.accounts.skr_mint.decimals;
     transfer_checked(
         CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             TransferChecked {
                 from: ctx.accounts.admin_token_account.to_account_info(),
                 mint: ctx.accounts.skr_mint.to_account_info(),
@@ -1268,7 +1269,7 @@ pub fn handle_faucet(ctx: Context<Faucet>) -> Result<()> {
     let seeds: &[&[u8]] = &[CONFIG_SEED, &[bump]];
     mint_to(
         CpiContext::new_with_signer(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             MintTo {
                 mint: ctx.accounts.skr_mint.to_account_info(),
                 to: ctx.accounts.owner_token_account.to_account_info(),
@@ -1568,7 +1569,7 @@ pub fn handle_stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
     let decimals = ctx.accounts.skr_mint.decimals;
     transfer_checked(
         CpiContext::new(
-            ctx.accounts.token_program.to_account_info(),
+            ctx.accounts.token_program.key(),
             TransferChecked {
                 from: ctx.accounts.owner_token_account.to_account_info(),
                 mint: ctx.accounts.skr_mint.to_account_info(),
@@ -2696,7 +2697,7 @@ pub fn handle_finalize_exit(ctx: Context<FinalizeExit>) -> Result<()> {
         let seeds: &[&[u8]] = &[CONFIG_SEED, &[bump]];
         transfer_checked(
             CpiContext::new_with_signer(
-                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.token_program.key(),
                 TransferChecked {
                     from: ctx.accounts.vault.to_account_info(),
                     mint: ctx.accounts.skr_mint.to_account_info(),
