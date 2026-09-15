@@ -60,4 +60,12 @@ pub mod clockin {
     pub fn reap(ctx: Context<Reap>) -> Result<()> {
         instructions::reap::handle_reap(ctx)
     }
+
+    pub fn request_exit(ctx: Context<ExitRequest>) -> Result<()> {
+        instructions::exit::handle_request_exit(ctx)
+    }
+
+    pub fn cancel_exit(ctx: Context<ExitRequest>) -> Result<()> {
+        instructions::exit::handle_cancel_exit(ctx)
+    }
 }

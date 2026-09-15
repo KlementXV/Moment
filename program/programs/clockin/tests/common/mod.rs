@@ -67,6 +67,13 @@ impl Ctx {
         assert_sbpf_v0(program_bytes);
         svm.add_program(clockin::id(), program_bytes).unwrap();
 
+        // Horloge figée au 2026-09-10 à 12 h UTC. La position de l'heure dans la
+        // journée décide quel jour est « entièrement terminé avant le déblocage »
+        // (§6.3) : la laisser dépendre de l'heure réelle rendrait ces tests instables.
+        let mut clock = svm.get_sysvar::<Clock>();
+        clock.unix_timestamp = 1_789_041_600;
+        svm.set_sysvar(&clock);
+
         let admin = Keypair::new();
         let authority = Keypair::new();
         svm.airdrop(&admin.pubkey(), 100 * 1_000_000_000).unwrap();
@@ -420,6 +427,31 @@ impl Ctx {
         };
         let admin = self.admin.insecure_clone();
         self.send(&[instruction], &[&admin])
+    }
+
+    pub fn request_exit(&mut self, user: &User) -> TransactionResult {
+        let data = clockin::instruction::RequestExit {}.data();
+        self.exit_request_instruction(user, data)
+    }
+
+    pub fn cancel_exit(&mut self, user: &User) -> TransactionResult {
+        let data = clockin::instruction::CancelExit {}.data();
+        self.exit_request_instruction(user, data)
+    }
+
+    fn exit_request_instruction(&mut self, user: &User, data: Vec<u8>) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::ExitRequest {
+                owner: user.pubkey(),
+                config: self.config,
+                profile: user.profile,
+            }
+            .to_account_metas(None),
+            data,
+        };
+        let signer = user.keypair.insecure_clone();
+        self.send(&[instruction], &[&signer])
     }
 
     /// Wallet + profil + faucet : l'utilisateur type des tests suivants.
