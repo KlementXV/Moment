@@ -35,4 +35,12 @@ pub mod clockin {
     pub fn seed_pool(ctx: Context<SeedPool>, amount: u64) -> Result<()> {
         instructions::initialize_config::handle_seed_pool(ctx, amount)
     }
+
+    pub fn create_profile(ctx: Context<CreateProfile>) -> Result<()> {
+        instructions::profile::handle_create_profile(ctx)
+    }
+
+    pub fn faucet(ctx: Context<Faucet>) -> Result<()> {
+        instructions::profile::handle_faucet(ctx)
+    }
 }

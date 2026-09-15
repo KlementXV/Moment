@@ -310,6 +310,47 @@ impl Ctx {
         .0
     }
 
+    pub fn create_profile(&mut self, user: &User) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::CreateProfile {
+                owner: user.pubkey(),
+                profile: user.profile,
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::CreateProfile {}.data(),
+        };
+        let signer = user.keypair.insecure_clone();
+        self.send(&[instruction], &[&signer])
+    }
+
+    pub fn faucet(&mut self, user: &User) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::Faucet {
+                owner: user.pubkey(),
+                config: self.config,
+                profile: user.profile,
+                skr_mint: self.mint,
+                owner_token_account: user.token_account,
+                token_program: spl_token::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::Faucet {}.data(),
+        };
+        let signer = user.keypair.insecure_clone();
+        self.send(&[instruction], &[&signer])
+    }
+
+    /// Wallet + profil + faucet : l'utilisateur type des tests suivants.
+    pub fn new_user(&mut self) -> User {
+        let user = self.new_wallet();
+        self.create_profile(&user).unwrap();
+        self.faucet(&user).unwrap();
+        user
+    }
+
     /// Crée un wallet avec des lamports et un compte de tokens SKR vide.
     /// Le profil et l'approvisionnement arrivent aux tâches 4 et 5.
     pub fn new_wallet(&mut self) -> User {
