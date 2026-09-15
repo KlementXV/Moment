@@ -1,4 +1,5 @@
 pub mod constants;
+pub mod economy;
 pub mod error;
 pub mod instructions;
 pub mod state;
@@ -6,6 +7,7 @@ pub mod state;
 use anchor_lang::prelude::*;
 
 pub use constants::*;
+pub use economy::*;
 pub use instructions::*;
 pub use state::*;
 
