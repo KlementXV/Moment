@@ -1782,10 +1782,14 @@ fn one_missed_day_costs_a_quarter_and_resets_the_streak() {
     ctx.warp_days(2); // le jour intermédiaire est manqué
     ctx.check_in(&user).unwrap();
 
+    // 40 SKR décimés de 25 % font 30 SKR, qui envoient 10 SKR au pool. La
+    // récompense du check-in se sert ensuite dans ce pool : 1 % de 30 SKR,
+    // soit 0,3 SKR qui reviennent aussitôt. La boucle est fermée, y compris
+    // pour celui qui vient de payer.
     let profile = ctx.profile_state(&user.profile);
-    assert_eq!(profile.staked, 30 * SKR, "40 SKR décimés de 25 %");
+    assert_eq!(profile.staked, 30_300_000_000);
     assert_eq!(profile.streak, 1, "le streak repart de zéro puis vaut 1");
-    assert_eq!(ctx.config_state().pool_balance, 10 * SKR);
+    assert_eq!(ctx.config_state().pool_balance, 9_700_000_000);
 }
 
 #[test]

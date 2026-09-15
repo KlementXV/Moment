@@ -47,4 +47,13 @@ pub mod clockin {
     pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
         instructions::stake::handle_stake(ctx, amount)
     }
+
+    pub fn check_in(
+        ctx: Context<CheckInAccounts>,
+        day: i64,
+        commitment: [u8; 32],
+        blob_ref: [u8; 32],
+    ) -> Result<()> {
+        instructions::check_in::handle_check_in(ctx, day, commitment, blob_ref)
+    }
 }

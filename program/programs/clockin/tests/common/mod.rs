@@ -362,6 +362,48 @@ impl Ctx {
         self.send(&[instruction], &[&signer])
     }
 
+    pub fn check_in(&mut self, user: &User) -> TransactionResult {
+        let authority = self.authority.insecure_clone();
+        let day = self.today();
+        self.check_in_full(user, &authority, day, [7u8; 32], [9u8; 32])
+    }
+
+    pub fn check_in_signed_by(&mut self, user: &User, authority: &Keypair) -> TransactionResult {
+        let day = self.today();
+        self.check_in_full(user, authority, day, [7u8; 32], [9u8; 32])
+    }
+
+    pub fn check_in_on_day(&mut self, user: &User, day: i64) -> TransactionResult {
+        let authority = self.authority.insecure_clone();
+        self.check_in_full(user, &authority, day, [7u8; 32], [9u8; 32])
+    }
+
+    pub fn check_in_full(
+        &mut self,
+        user: &User,
+        authority: &Keypair,
+        day: i64,
+        commitment: [u8; 32],
+        blob_ref: [u8; 32],
+    ) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::CheckInAccounts {
+                owner: user.pubkey(),
+                publication_authority: authority.pubkey(),
+                config: self.config,
+                profile: user.profile,
+                check_in: self.check_in_address(&user.pubkey(), day),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::CheckIn { day, commitment, blob_ref }.data(),
+        };
+        let owner = user.keypair.insecure_clone();
+        let authority = authority.insecure_clone();
+        self.send(&[instruction], &[&owner, &authority])
+    }
+
     /// Wallet + profil + faucet : l'utilisateur type des tests suivants.
     pub fn new_user(&mut self) -> User {
         let user = self.new_wallet();
