@@ -48,6 +48,17 @@ pub fn reward(staked: u64, reward_rate_bps: u16, reward_cap: u64, pool_balance: 
     raw.min(reward_cap).min(pool_balance)
 }
 
+/// Dernier jour pénalisable. Hier en temps normal ; pendant une sortie, jamais
+/// au-delà du dernier jour entièrement terminé avant le déblocage (§6.3, §6.4).
+pub fn settle_bound(exit_unlock_at: i64, today: i64) -> i64 {
+    let by_today = today - 1;
+    if exit_unlock_at > 0 {
+        by_today.min(day_of(exit_unlock_at) - 1)
+    } else {
+        by_today
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,6 +115,20 @@ mod tests {
                 assert_eq!(out.remaining + out.lost, staked, "missed={missed} staked={staked}");
             }
         }
+    }
+
+    #[test]
+    fn settle_bound_stops_at_yesterday_without_a_pending_exit() {
+        assert_eq!(settle_bound(0, 100), 99);
+    }
+
+    #[test]
+    fn settle_bound_never_passes_the_last_full_day_before_unlock() {
+        // Déblocage au milieu du jour 101 : le dernier jour entièrement terminé
+        // avant le déblocage est le jour 100 (§6.3).
+        let unlock_at = 101 * DAY_SECONDS + 3_600;
+        assert_eq!(settle_bound(unlock_at, 105), 100);
+        assert_eq!(settle_bound(unlock_at, 100), 99, "on ne pénalise jamais au-delà d'hier");
     }
 
     #[test]

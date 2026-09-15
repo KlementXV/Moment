@@ -1437,14 +1437,15 @@ fn staking_after_two_missed_days_decays_the_old_balance_only() {
     let user = ctx.new_user();
     ctx.stake(&user, 40 * SKR).unwrap();
 
-    // Jour J : dépôt. Jours J+1 et J+2 manqués. Dépôt le jour J+3.
+    // Miser n'est pas publier : le jour J est manqué lui aussi, comme J+1 et J+2.
+    // Une position ouverte le jour J l'est avec settled_day = J - 1 (§5).
     ctx.warp_days(3);
     ctx.stake(&user, 10 * SKR).unwrap();
 
-    // 40 SKR décimés deux fois à 25 % = 22,5 SKR, plus 10 SKR intacts.
+    // 40 SKR décimés trois fois à 25 % = 16,875 SKR, plus 10 SKR intacts.
     let profile = ctx.profile_state(&user.profile);
-    assert_eq!(profile.staked, 32_500_000_000);
-    assert_eq!(ctx.config_state().pool_balance, 17_500_000_000);
+    assert_eq!(profile.staked, 26_875_000_000);
+    assert_eq!(ctx.config_state().pool_balance, 23_125_000_000);
     assert_eq!(profile.settled_day, ctx.today() - 1);
     assert_eq!(ctx.vault_balance(), 50 * SKR, "les tokens ne bougent jamais lors d'un decay");
 }

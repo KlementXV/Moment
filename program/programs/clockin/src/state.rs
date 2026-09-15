@@ -1,5 +1,7 @@
 use anchor_lang::prelude::*;
 
+use crate::economy::{decay, settle_bound};
+
 /// PDA singleton, graine `CONFIG_SEED`. Autorité du vault et porteur des
 /// paramètres économiques, calibrables sans redéploiement (§15.2).
 #[account]
@@ -59,4 +61,29 @@ pub struct CheckIn {
     /// Slot d'inscription : l'ancre temporelle.
     pub slot: u64,
     pub streak_at_checkin: u32,
+}
+
+impl Profile {
+    pub fn settle_bound(&self, today: i64) -> i64 {
+        settle_bound(self.exit_unlock_at, today)
+    }
+
+    /// Applique le decay des jours non réglés jusqu'à `through_day` inclus.
+    /// Le montant perdu alimente le pool ; aucun token SPL ne bouge.
+    /// Séparer `settled_day` de `last_checkin_day` est ce qui rend `reap` sûr
+    /// contre le double-decay : un jour réglé ne l'est jamais deux fois.
+    pub fn settle_through(&mut self, config: &mut Config, through_day: i64) {
+        if !self.active {
+            return;
+        }
+        let missed = through_day - self.settled_day;
+        if missed <= 0 {
+            return;
+        }
+        let outcome = decay(self.staked, missed, config.decay_bps, config.max_decay_days);
+        self.staked = outcome.remaining;
+        config.pool_balance = config.pool_balance.saturating_add(outcome.lost);
+        self.settled_day = through_day;
+        self.streak = 0;
+    }
 }

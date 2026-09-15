@@ -343,6 +343,25 @@ impl Ctx {
         self.send(&[instruction], &[&signer])
     }
 
+    pub fn stake(&mut self, user: &User, amount: u64) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::Stake {
+                owner: user.pubkey(),
+                config: self.config,
+                profile: user.profile,
+                skr_mint: self.mint,
+                owner_token_account: user.token_account,
+                vault: self.vault,
+                token_program: spl_token::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::Stake { amount }.data(),
+        };
+        let signer = user.keypair.insecure_clone();
+        self.send(&[instruction], &[&signer])
+    }
+
     /// Wallet + profil + faucet : l'utilisateur type des tests suivants.
     pub fn new_user(&mut self) -> User {
         let user = self.new_wallet();

@@ -43,4 +43,8 @@ pub mod clockin {
     pub fn faucet(ctx: Context<Faucet>) -> Result<()> {
         instructions::profile::handle_faucet(ctx)
     }
+
+    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
+        instructions::stake::handle_stake(ctx, amount)
+    }
 }
