@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+// litesvm renvoie un TransactionResult dont la variante Err est volumineuse.
+// C'est son type, pas le nôtre, et il traverse tout le harness.
+#![allow(clippy::result_large_err)]
 
 use {
     anchor_lang::{
