@@ -54,15 +54,56 @@ APK : `app/app/build/outputs/apk/debug/app-debug.apk`. Identifiant Android conse
 - **5 tests Android** : rotation et miroir, recadrage/résolution, GPS/identité/date, segments XMP/IPTC/commentaires, chiffrement Android Keystore.
 - Android Lint et contrôle du parcours sur Pixel 7 Pro / API 36.
 
+## Programme on-chain (devnet)
+
+Programme Anchor `clockin` : `7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1`.
+
+Comptes : `Config` (PDA singleton, paramètres et pool), `Profile` (PDA par wallet),
+`CheckIn` (PDA par couple wallet × jour, portant le commitment et la référence du
+blob). Tout le SKR vit dans un vault SPL unique ; le decay et les récompenses sont
+de la comptabilité, seuls `stake`, `seed_pool`, `faucet` et `finalize_exit` déplacent
+réellement des tokens.
+
+Instructions : `initialize_config`, `update_config`, `set_publication_authority`,
+`seed_pool`, `create_profile`, `faucet`, `stake`, `check_in`, `reap`, `request_exit`,
+`cancel_exit`, `finalize_exit`.
+
+`check_in` exige une **co-signature de l'autorité de publication** : un client modifié
+ne peut ni publier ni toucher de récompense sans le contrôle serveur.
+
+Paramètres en vigueur : mise minimum 10 SKR, rendement 1 %/jour plafonné à 1 SKR,
+decay 25 % par jour manqué borné à 30 jours, sortie à 48 h, faucet 100 SKR.
+
+```sh
+cd program
+anchor build --arch v0 && cargo test
+```
+
+**L'architecture SBPF doit rester v0** : `anchor build` cible v3 par défaut, que le
+runtime embarqué dans litesvm refuse de charger. Voir
+[la décision](docs/decisions/2026-09-15-architecture-sbpf.md).
+
+58 tests : 13 unitaires sur l'économie pure, 45 d'intégration sous litesvm
+(configuration, profil, faucet, mise, check-in, decay, reap, sorties, invariant de
+conservation du vault).
+
+Le développement suit les [plans](docs/superpowers/plans/2026-09-15-00-feuille-de-route.md).
+
 ## Prochains lots
 
-1. Manifeste canonique et signature MWA des images nettoyées.
-2. Contrôle local, serveur de vérification/modération et autorisation de publication. Aucun upload de photos avant ces contrôles.
-3. Programme Anchor : remplacer le compteur initial par comptes, vault SPL et instructions métier, avec tests LiteSVM.
-4. Transaction `check_in`, stockage distant chiffré et distribution des clés du feed.
-5. Validation du mode double caméra sur Seeker physique.
+1. Déploiement devnet du programme, puis branchement de l'app : manifeste canonique,
+   signature MWA, lecture des comptes par RPC et transaction `check_in` réelle.
+   L'économie simulée en Kotlin disparaît à ce moment
+   ([plan 02](docs/superpowers/plans/2026-09-15-02-app-onchain.md)).
+2. Keyserver : chiffrement du paquet, bucket privé, contrôle avant publication,
+   co-signature de l'autorisation et distribution des clés du feed
+   ([plan 03](docs/superpowers/plans/2026-09-15-03-keyserver-et-feed.md)).
+3. Écran de vérification par divulgation sélective, filtre local et Seed Vault
+   ([plan 04](docs/superpowers/plans/2026-09-15-04-differenciation-et-livrables.md)).
+4. Validation du mode double caméra sur Seeker physique.
 
-Le programme Anchor initial n’a pas été modifié dans ce lot. Les paramètres économiques de démo restent provisoires : minimum 10 SKR, decay 25 %, récompense 1 % plafonnée à 1 SKR et au pool disponible, sortie 48 h.
+Les paramètres économiques restent provisoires et vivent dans `Config`, donc
+calibrables sur devnet sans redéploiement.
 
 ## Références techniques
 

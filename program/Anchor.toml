@@ -9,11 +9,15 @@ skip-lint = false
 [programs.localnet]
 clockin = "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"
 
+[programs.devnet]
+clockin = "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"
+
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "cargo test"
+build = "anchor build --arch v0"
+test = "anchor build --arch v0 && cargo test"
 
 [hooks]
