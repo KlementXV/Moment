@@ -1,0 +1,15 @@
+{
+  "name": "clockin-scripts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bootstrap": "tsx bootstrap-devnet.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
