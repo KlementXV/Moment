@@ -2,36 +2,40 @@
 
 Application Android native pour la communauté Seeker, basée sur le [plan produit](docs/superpowers/specs/2026-09-14-clock-in-design.md). Nom et direction graphique : [Moment](docs/moment-design.md).
 
-## Version 0.2 — capture réelle, sauvegarde locale
+## Version 0.3 — état on-chain sur devnet
 
 - Interface Kotlin / Compose : graphite, ivoire, menthe et lavande ; navigation animée et retours tactiles.
-- Connexion Mobile Wallet Adapter : autorisation wallet réelle, indépendante des soldes fictifs.
+- **L'économie vit on-chain.** L'app lit `Config`, `Profile` et le `CheckIn` du jour par RPC devnet : solde, série, total, demande de sortie et compte à rebours viennent des comptes Solana. L'ancienne simulation Kotlin est supprimée.
+- Le solde affiché est celui **après le decay déjà dû** — ce que l'utilisateur a réellement, pas la valeur périmée stockée dans le compte. Le programme appliquera exactement le même calcul.
+- Transactions construites et envoyées par l'app : `create_profile`, `faucet`, `stake`, `check_in`, `request_exit`, `cancel_exit`, `finalize_exit`. Signature par le wallet via Mobile Wallet Adapter ; aucune clé privée d'utilisateur ne transite par l'app.
+- **Manifeste canonique `clockin-post-v1`** signé par le wallet en signature détachée. Son SHA-256 est le `commitment` inscrit on-chain. Format figé et documenté dans [docs/manifest-v1.md](docs/manifest-v1.md), verrouillé par un vecteur d'or calculé indépendamment.
 - Capture **CameraX réelle et séquentielle** : scène arrière, puis selfie. Permissions à la demande, refus, retour depuis les réglages et erreurs caméra gérés. Aucun import galerie ni permission de localisation.
-- Aperçu des deux photos, agrandissement du selfie au toucher, reprise de la paire avant validation.
-- Normalisation de l’orientation, miroir du selfie, recadrage CameraX, réduction à 1280 pixels maximum, conversion sRGB et nouveau JPEG. Suppression des segments APP/COM (dont les profils ajoutés par l’encodeur Android), puis contrôle des octets nettoyés.
-- Les buffers bruts restent en mémoire et sont fermés après traitement. Aucun original ne passe par un fichier ou par le réseau.
-- Snapshot local **AES-256-GCM**, clé dans Android Keystore, fichier atomique dans `noBackupFilesDir`. Les deux photos, leurs SHA-256 et l’état économique fictif sont enregistrés ensemble.
-- Dernier Moment et position démo restaurés après fermeture de l’app. Feed du jour verrouillé avant son propre enregistrement ; le post de `maya.skr` reste un exemple fictif illustré.
-- Mise fictive, série UTC, decay, récompense bornée au pool, demande de sortie à 48 h et annulation.
+- Normalisation de l'orientation, miroir du selfie, recadrage, réduction à 1280 pixels, conversion sRGB et nouveau JPEG. Suppression des segments APP/COM, puis contrôle des octets nettoyés.
+- Brouillon de capture chiffré **AES-256-GCM**, clé dans Android Keystore, fichier atomique dans `noBackupFilesDir`. Il ne contient plus aucun solde.
 
-### Ce qui reste local
+### Ce qui n'est pas encore là
 
-Les photos ne sont **pas envoyées** et aucun token n’est transféré. « Enregistrer mon Moment · local » sauvegarde sur cet appareil et avance la simulation économique. Ce n’est pas une publication on-chain.
+Les photos ne sont **pas envoyées**. `blob_ref` porte provisoirement le commitment, faute de blob déposé : le chiffrement du paquet, le bucket privé et la distribution des clés arrivent avec le keyserver (plan 03).
 
-Le chiffrement local protège le fichier au repos ; l’app peut déchiffrer ce fichier avec sa clé Keystore. Il ne constitue pas encore le chiffrement par publication avec séquestre des clés décrit dans le plan. Les SHA-256 locaux servent au contrôle d’intégrité ; ils ne remplacent ni manifeste canonique ni signature wallet.
+Le feed n'affiche donc que ton propre Moment, depuis le brouillon local. Les Moments des autres exigent les clés de déchiffrement, que seul le keyserver pourra délivrer.
 
-Un seul post local est conservé : le prochain enregistrement quotidien le remplace. Une paire complète en attente de validation survit à la rotation via le ViewModel, mais pas à l’arrêt du processus. Une capture incomplète est à recommencer après recréation de l’écran. Les photos déjà enregistrées et la position restent persistantes.
+L'autorisation de publication est co-signée par une **clé de développement** lue dans `local.properties`, présente sur l'appareil. C'est une béquille assumée : elle disparaît quand le keyserver prend ce rôle, et `set_publication_authority` permet la rotation. Un build release sans cette clé refuse simplement de publier.
 
-En cas de fichier corrompu ou de clé inaccessible, la lecture échoue avec un message et un bouton de nouvelle tentative ; l’app n’écrase pas automatiquement le fichier. Désinstaller l’app ou effacer ses données Android efface la démo et sa clé. Aucun compte blockchain n’est affecté.
+Signer localement exige Android 13 (Ed25519 dans `java.security`). Le Seeker en dispose.
 
 ## Essayer sur Seeker / émulateur
 
-1. Installer l’APK, puis **Découvrir Moment**.
-2. Dans **Moi**, recevoir 100 SKR fictifs et miser 50 SKR.
+Prérequis : un déploiement devnet renseigné dans `app/local.properties`
+(`clockin.rpcUrl`, `clockin.programId`, `clockin.skrMint`,
+`clockin.publicationAuthority`, `clockin.devAuthoritySecret`) et un wallet
+Solana Mobile installé.
+
+1. Installer l'APK, puis **Découvrir Moment**.
+2. Dans **Moi**, connecter le wallet, recevoir 100 SKR de test puis miser 50 SKR. Chaque étape est une transaction signée par le wallet.
 3. Dans **Capturer**, autoriser la caméra, capturer la scène, puis prendre le selfie.
-4. Vérifier les deux images (toucher le petit cadre pour l’agrandir), reprendre si besoin, puis **Enregistrer mon Moment · local**.
-5. Vérifier le feed et fermer / relancer l’app : le Moment et le solde sont retrouvés.
-6. Depuis **Moi**, essayer la demande de sortie et l’annulation. Le délai est réellement de 48 h.
+4. Vérifier les deux images, reprendre si besoin, puis publier : le wallet signe le manifeste, puis la transaction `check_in`.
+5. Vérifier le compte `CheckIn` du jour dans un explorateur devnet : son `commitment` est le SHA-256 du manifeste signé.
+6. Depuis **Moi**, essayer la demande de sortie et l'annulation. Le délai est réellement de 48 h.
 
 L’émulateur utilise ses caméras virtuelles ; rendu, latence et double caméra quasi simultanée restent à valider sur Seeker physique.
 
@@ -50,9 +54,9 @@ APK : `app/app/build/outputs/apk/debug/app-debug.apk`. Identifiant Android conse
 
 ### Vérifications
 
-- **20 tests JVM** : économie, sortie, UTC, Base58 ; format local borné, hashes, données tronquées, chiffrement aléatoire, mauvaise clé et altération du ciphertext/nonce.
+- **49 tests JVM** : Base58, discriminants Anchor recroisés avec l'IDL, encodage des instructions, décodage des comptes et solde après decay, client RPC sur pilote injecté, manifeste canonique et son vecteur d'or, assemblage et réparation de signatures, Ed25519 sur vecteurs RFC 8032, format local borné et chiffrement.
 - **5 tests Android** : rotation et miroir, recadrage/résolution, GPS/identité/date, segments XMP/IPTC/commentaires, chiffrement Android Keystore.
-- Android Lint et contrôle du parcours sur Pixel 7 Pro / API 36.
+- Android Lint sans erreur.
 
 ## Programme on-chain (devnet)
 
