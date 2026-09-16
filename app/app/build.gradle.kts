@@ -1,6 +1,19 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+/** Paramètres de déploiement : ils vivent dans local.properties, jamais dans le
+ * dépôt. Une valeur absente reste vide et l'app le signale à l'exécution. */
+fun setting(key: String, fallback: String): String {
+    val properties = Properties().apply {
+        val file = rootProject.file("local.properties")
+        if (file.exists()) file.inputStream().use { load(it) }
+    }
+    return "\"" + (properties.getProperty(key) ?: fallback) + "\""
 }
 
 android {
@@ -11,14 +24,26 @@ android {
         applicationId = "com.clockin.hackathon"
         minSdk = 26
         targetSdk = 37
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "RPC_URL", setting("clockin.rpcUrl", "https://api.devnet.solana.com"))
+        buildConfigField("String", "PROGRAM_ID", setting("clockin.programId", "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"))
+        buildConfigField("String", "SKR_MINT", setting("clockin.skrMint", ""))
+        buildConfigField("String", "PUBLICATION_AUTHORITY", setting("clockin.publicationAuthority", ""))
+        buildConfigField("String", "NETWORK", setting("clockin.network", "devnet"))
     }
 
     buildTypes {
+        debug {
+            // Béquille de semaine 1 : co-signature locale de check_in, retirée
+            // par le plan 03 quand le keyserver prend ce rôle.
+            buildConfigField("String", "DEV_AUTHORITY_SECRET", setting("clockin.devAuthoritySecret", ""))
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField("String", "DEV_AUTHORITY_SECRET", "\"\"")
         }
     }
 
@@ -29,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -53,4 +79,5 @@ dependencies {
     implementation("com.solanamobile:web3-solana:0.3.1")
     implementation("com.solanamobile:rpc-core:0.2.11")
     implementation("io.github.funkatronics:multimult:0.2.6")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
 }

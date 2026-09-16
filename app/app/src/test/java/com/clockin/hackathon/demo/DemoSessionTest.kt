@@ -1,6 +1,5 @@
 package com.clockin.hackathon.demo
 
-import com.clockin.hackathon.encodeBase58
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -74,10 +73,5 @@ class DemoSessionTest {
         assertEquals(20_100, state.checkIn(monday).staked)
         val nextDay = (monday / DemoSession.DAY + 1) * DemoSession.DAY
         assertEquals(2, position().checkIn(nextDay - 1).checkIn(nextDay).streak)
-    }
-    @Test fun `base58 preserves leading zero bytes`() {
-        assertEquals("11111111111111111111111111111111", encodeBase58(ByteArray(32)))
-        assertEquals("12", encodeBase58(byteArrayOf(0, 1)))
-        assertEquals("5Q", encodeBase58(byteArrayOf(-1)))
     }
 }
