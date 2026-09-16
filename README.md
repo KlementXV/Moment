@@ -23,6 +23,18 @@ L'autorisation de publication est co-signée par une **clé de développement** 
 
 Signer localement exige Android 13 (Ed25519 dans `java.security`). Le Seeker en dispose.
 
+## Déploiement devnet
+
+Le programme tourne sur devnet. Adresses, transactions de bootstrap et procédure
+de vérification : [docs/devnet-run.md](docs/devnet-run.md).
+
+L'autorité de mint du SKR de test est le PDA `Config` : **seul le faucet du
+programme peut en créer**, l'admin compris. C'est ce qui rend le solde affiché
+digne de confiance.
+
+Un test JVM décode le compte `Config` réel de devnet : si le décodeur Kotlin et
+le programme Rust divergent sur un champ, il tombe.
+
 ## Essayer sur Seeker / émulateur
 
 Prérequis : un déploiement devnet renseigné dans `app/local.properties`
