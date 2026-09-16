@@ -50,8 +50,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.clockin.hackathon.demo.DemoSession
-import com.clockin.hackathon.capture.MomentModel
+import com.clockin.hackathon.ChainState
+import com.clockin.hackathon.ClockInModel
+import com.clockin.hackathon.SKR
 import com.clockin.hackathon.capture.PhotoPair
 import kotlinx.coroutines.delay
 import java.time.Instant
@@ -67,25 +68,29 @@ internal val Purple = Color(0xFFC2B5F5)
 internal val Line = Color(0xFF292D33)
 internal val White = Color(0xFFF4F3EF)
 internal val Shape = RoundedCornerShape(28.dp)
-private fun money(value: Long) = String.format(Locale.FRANCE, "%.2f", value / 100.0)
+/** Le mint SKR de test a 9 décimales. On en affiche deux, sans arrondi trompeur. */
+private fun money(value: Long) = String.format(Locale.FRANCE, "%.2f", value / SKR.toDouble())
+private const val DAY_SECONDS = 86_400L
 private fun countdown(seconds: Long): String {
     val s = seconds.coerceAtLeast(0)
     return "%02d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60)
 }
 
 @Composable
-fun MomentApp(wallet: String?, connecting: Boolean, walletError: String?, connect: () -> Unit, model: MomentModel) {
+fun MomentApp(model: ClockInModel) {
     var entered by rememberSaveable { mutableStateOf(false) }
     var page by rememberSaveable { mutableStateOf("feed") }
-    val session = model.snapshot.session
-    LaunchedEffect(model.ready) { if (model.ready && session.faucetClaimed) entered = true }
+    val state = model.state
+    val wallet = model.walletAddress
+    LaunchedEffect(state.loaded) { if (state.loaded && state.faucetClaimed) entered = true }
     var now by remember { mutableLongStateOf(Instant.now().epochSecond) }
     var confirmExit by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { while (true) { now = Instant.now().epochSecond; delay(1000) } }
-    val state = session.settle(now)
-    val posted = state.lastCheckIn == now / DemoSession.DAY
-    val unlocked = posted && state.active && state.staked >= DemoSession.MIN_STAKE &&
-        (state.exitUnlock == 0L || now < state.exitUnlock)
+    // Relecture de la chaîne au passage d'un jour UTC : le feed et la fenêtre
+    // de publication changent à minuit, pas à l'heure locale.
+    LaunchedEffect(wallet, now / DAY_SECONDS) { if (wallet != null) model.refresh() }
+    val posted = state.posted
+    val unlocked = state.feedUnlocked
     BackHandler(entered && page != "feed") { page = "feed" }
     MaterialTheme(colorScheme = darkColorScheme(primary = Mint, secondary = Purple,
         background = Ink, surface = Panel, onPrimary = Ink, onSurface = White, onBackground = White),
@@ -95,14 +100,14 @@ fun MomentApp(wallet: String?, connecting: Boolean, walletError: String?, connec
             labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 15.sp, fontWeight = FontWeight.Medium)
         )) {
         Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
-            if (!model.ready) {
+            if (wallet != null && !state.loaded) {
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(28.dp), verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     if (model.error == null) CircularProgressIndicator(color = Mint)
                     else {
-                        InfoCard("Tes Moments restent sur cet appareil.", model.error!!)
+                        InfoCard("Lecture de la chaîne", model.error!!)
                         Spacer(Modifier.height(20.dp))
-                        PrimaryButton("Réessayer", enabled = !model.busy, onClick = model::reload)
+                        PrimaryButton("Réessayer", enabled = !model.busy, onClick = model::refresh)
                     }
                 }
             } else {
@@ -110,7 +115,7 @@ fun MomentApp(wallet: String?, connecting: Boolean, walletError: String?, connec
                 fadeIn(tween(300)) togetherWith fadeOut(tween(180))
             }, label = "welcome") { isEntered ->
             if (!isEntered) {
-                Welcome(wallet, connecting, walletError, connect) { entered = true }
+                Welcome(wallet, model.busy, model.error, model::connect) { entered = true }
             } else {
                 Scaffold(containerColor = Ink, contentWindowInsets = WindowInsets.safeDrawing,
                     bottomBar = { BottomBar(page) { page = it } }) { padding ->
@@ -126,17 +131,17 @@ fun MomentApp(wallet: String?, connecting: Boolean, walletError: String?, connec
                             verticalArrangement = Arrangement.spacedBy(24.dp)) {
                         when (currentPage) {
                             "feed" -> Feed(state, now, unlocked, posted,
-                                photos = model.snapshot.post?.takeIf { it.day == now / DemoSession.DAY }?.photos,
-                                onCapture = { page = if (state.active && state.staked >= DemoSession.MIN_STAKE) "capture" else "profile" },
+                                photos = model.draft,
+                                onCapture = { page = if (state.canPublish(now)) "capture" else "profile" },
                                 onProfile = { page = "profile" })
                             "capture" -> Capture(state, now, posted, model, onProfile = { page = "profile" },
                                 onPublish = { model.publish { page = "feed" } })
-                            "profile" -> Profile(state, now, wallet, connecting, walletError, connect,
-                                onFaucet = { model.update { it.faucet() } },
-                                onStake = { amount -> model.update { it.stake(amount, Instant.now().epochSecond) } },
+                            "profile" -> Profile(state, now, wallet, model.busy, model.error, model::connect,
+                                onFaucet = model::claimFaucet,
+                                onStake = model::stake,
                                 onExit = { confirmExit = true },
-                                onCancel = { model.update { it.cancelExit(Instant.now().epochSecond) } },
-                                onWithdraw = { model.update { it.withdraw(Instant.now().epochSecond) } })
+                                onCancel = model::cancelExit,
+                                onWithdraw = model::finalizeExit)
                         }
                         }
                     }
@@ -145,14 +150,14 @@ fun MomentApp(wallet: String?, connecting: Boolean, walletError: String?, connec
             }
             }
             }
-            if (model.ready && model.error != null) AlertDialog(onDismissRequest = model::dismissError,
+            if (state.loaded && model.error != null) AlertDialog(onDismissRequest = model::dismissError,
                 title = { Text("Le Moment n’est pas perdu.") }, text = { Text(model.error!!) },
                 confirmButton = { TextButton(onClick = model::dismissError) { Text("Compris") } })
             if (confirmExit) AlertDialog(onDismissRequest = { confirmExit = false },
                 containerColor = Panel, title = { Text("Lancer les 48 heures ?") },
-                text = { Text("Dans cette démo, ta mise reste active pendant l’attente. Continue tes check-ins : chaque jour UTC manqué réduit le solde de 25 %. Ce taux est provisoire.") },
+                text = { Text("Ta mise reste active pendant l’attente. Continue tes check-ins : chaque jour UTC manqué réduit le solde de 25 %. Ce taux est provisoire.") },
                 confirmButton = { TextButton(onClick = {
-                    model.update { it.requestExit(Instant.now().epochSecond) }; confirmExit = false
+                    model.requestExit(); confirmExit = false
                 }) { Text("Demander la sortie") } },
                 dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Rester") } })
         }
@@ -197,7 +202,7 @@ private fun Welcome(wallet: String?, connecting: Boolean, error: String?, connec
                 else if (connecting) "Connexion…" else "Connecter mon wallet", color = Muted)
         }
         if (error != null) Text(error, color = Purple, fontSize = 13.sp)
-        Text("Caméra réelle · Sauvegarde locale · SKR fictifs", color = Muted,
+        Text("Caméra réelle · Devnet · SKR de test", color = Muted,
             fontSize = 11.sp, textAlign = TextAlign.Center)
     }
 }
@@ -212,7 +217,7 @@ private fun Feature(number: String, title: String, subtitle: String) {
 }
 
 @Composable
-private fun Feed(state: DemoSession, now: Long, unlocked: Boolean, posted: Boolean, photos: PhotoPair?, onCapture: () -> Unit, onProfile: () -> Unit) {
+private fun Feed(state: ChainState, now: Long, unlocked: Boolean, posted: Boolean, photos: PhotoPair?, onCapture: () -> Unit, onProfile: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Text(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRANCE).withZone(ZoneOffset.UTC)
             .format(Instant.ofEpochSecond(now)).uppercase(Locale.FRANCE) + " · UTC", color = Muted, fontSize = 10.sp,
@@ -224,7 +229,7 @@ private fun Feed(state: DemoSession, now: Long, unlocked: Boolean, posted: Boole
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(if (posted) "À demain" else "Prends ton temps", color = Mint, fontSize = 10.sp, letterSpacing = 1.sp)
-            Text(if (posted) "Ton Moment est enregistré · local" else "Clôture dans ${countdown(DemoSession.DAY - now % DemoSession.DAY)}",
+            Text(if (posted) "Ton Moment est inscrit on-chain" else "Clôture dans ${countdown(DAY_SECONDS - now % DAY_SECONDS)}",
                 fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
         }
         Glyph(if (posted) "check" else "clock", Mint)
@@ -234,9 +239,12 @@ private fun Feed(state: DemoSession, now: Long, unlocked: Boolean, posted: Boole
         Text("Aujourd’hui", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp)
     }
     if (unlocked) {
-        PostCard("toi", "Aujourd’hui · sur cet appareil", "Un petit moment. Une bonne habitude.", true, photos)
-        PostCard("maya.skr", "Membre fictif · illustration", "Prendre le temps de lever les yeux.", false)
-        Text("Tu as fait le tour. À demain, dans la vraie vie.", color = Muted, fontSize = 12.sp)
+        PostCard("toi", "Aujourd’hui · série de ${state.streak}", "Un petit moment. Une bonne habitude.", true, photos)
+        Text(
+            "Les Moments des autres arrivent avec le serveur de clés : leurs photos sont chiffrées, " +
+                "et personne ne peut les lire sans clé.",
+            color = Muted, fontSize = 12.sp, lineHeight = 18.sp,
+        )
     } else {
         Box(Modifier.fillMaxWidth().heightIn(min = 330.dp).clip(Shape).background(Panel)) {
             Landscape(Modifier.matchParentSize())
@@ -249,34 +257,40 @@ private fun Feed(state: DemoSession, now: Long, unlocked: Boolean, posted: Boole
                 Text("Un Moment à partager.", fontWeight = FontWeight.Bold, fontSize = 19.sp, textAlign = TextAlign.Center)
                 Text("Partage un instant de ta journée\npour découvrir celui des autres.", color = Muted,
                     fontSize = 14.sp, lineHeight = 21.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                PrimaryButton(if (state.active && state.staked >= DemoSession.MIN_STAKE) "Partager mon Moment" else "Préparer ma mise démo", onClick = onCapture)
+                PrimaryButton(if (state.canPublish(now)) "Partager mon Moment" else "Préparer ma mise", onClick = onCapture)
             }
-            Text("Illustration · aperçu de la démo", Modifier.align(Alignment.BottomCenter).padding(13.dp), color = Muted, fontSize = 9.sp, letterSpacing = 2.sp)
+            Text("Illustration · en attente de ton Moment", Modifier.align(Alignment.BottomCenter).padding(13.dp), color = Muted, fontSize = 9.sp, letterSpacing = 2.sp)
         }
     }
     Row(Modifier.fillMaxWidth().clickable(onClick = onProfile).padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween) {
         Text("${state.streak} jour${if (state.streak > 1) "s" else ""} de série", color = Purple, fontSize = 13.sp)
-        Text("${money(state.staked)} SKR démo  ↗", color = Muted, fontSize = 13.sp)
+        Text("${money(state.balance)} SKR misés  ↗", color = Muted, fontSize = 13.sp)
     }
 }
 
 @Composable
-private fun Capture(state: DemoSession, now: Long, posted: Boolean, model: MomentModel,
+private fun Capture(state: ChainState, now: Long, posted: Boolean, model: ClockInModel,
     onProfile: () -> Unit, onPublish: () -> Unit) {
     Text("Ton Moment.", fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
     Text("Deux points de vue. Un seul souvenir.", color = Muted, fontSize = 15.sp)
     when {
         posted -> {
-            model.snapshot.post?.photos?.let { PhotoPairView(it, Modifier.fillMaxWidth().height(360.dp)) }
-            InfoCard("C’est fait pour aujourd’hui.", "Ton Moment est sauvegardé sur cet appareil. Prochain rendez-vous à 00:00 UTC.")
+            model.draft?.let { PhotoPairView(it, Modifier.fillMaxWidth().height(360.dp)) }
+            InfoCard(
+                "C’est fait pour aujourd’hui.",
+                "Ton Moment est inscrit on-chain. Prochain rendez-vous à 00:00 UTC.",
+            )
         }
-        state.exitUnlock > 0 && now >= state.exitUnlock -> {
-            InfoCard("Ta sortie est prête.", "Retire ta mise démo depuis ton profil avant de commencer une nouvelle position.")
+        state.exitUnlockAt > 0 && now >= state.exitUnlockAt -> {
+            InfoCard("Ta sortie est prête.", "Retire ta mise depuis ton profil avant de commencer une nouvelle position.")
             PrimaryButton("Voir mon profil", onClick = onProfile)
         }
-        !state.active || state.staked < DemoSession.MIN_STAKE -> {
-            InfoCard("Une petite mise pour commencer.", "Il faut au moins 10 SKR fictifs pour participer à la démo.")
+        !state.active || state.balance < state.minStake -> {
+            InfoCard(
+                "Une petite mise pour commencer.",
+                "Il faut au moins ${money(state.minStake)} SKR misés pour publier.",
+            )
             PrimaryButton("Préparer ma mise", onClick = onProfile)
         }
         else -> CameraCapture(model.draft, model.busy, model::replaceDraft, onPublish)
@@ -284,9 +298,9 @@ private fun Capture(state: DemoSession, now: Long, posted: Boolean, model: Momen
 }
 
 @Composable
-private fun Profile(state: DemoSession, now: Long, wallet: String?, connecting: Boolean, error: String?, connect: () -> Unit,
+private fun Profile(state: ChainState, now: Long, wallet: String?, connecting: Boolean, error: String?, connect: () -> Unit,
     onFaucet: () -> Unit, onStake: (Long) -> Unit, onExit: () -> Unit, onCancel: () -> Unit, onWithdraw: () -> Unit) {
-    var amount by rememberSaveable { mutableLongStateOf(5_000) }
+    var amount by rememberSaveable { mutableLongStateOf(50 * SKR) }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
         Box(Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(Brush.linearGradient(listOf(Purple, Mint))), contentAlignment = Alignment.Center) {
             Text("S", color = Ink, fontWeight = FontWeight.Black, fontSize = 28.sp)
@@ -298,52 +312,57 @@ private fun Profile(state: DemoSession, now: Long, wallet: String?, connecting: 
     }
     Column(Modifier.fillMaxWidth().clip(Shape).background(Brush.linearGradient(listOf(Color(0xFF1B2B29), Panel)))
         .border(1.dp, Mint.copy(alpha = .12f), Shape).padding(23.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Solde démo", color = Mint, fontSize = 10.sp, letterSpacing = 2.sp)
+        Text("Mise on-chain", color = Mint, fontSize = 10.sp, letterSpacing = 2.sp)
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(money(state.staked), fontSize = 43.sp, fontWeight = FontWeight.Bold, letterSpacing = (-2).sp)
+            Text(money(state.balance), fontSize = 43.sp, fontWeight = FontWeight.Bold, letterSpacing = (-2).sp)
             Text("SKR", Modifier.padding(bottom = 8.dp), color = Mint, fontWeight = FontWeight.Medium)
         }
         HorizontalDivider(color = Mint.copy(alpha = .15f))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Feature("Ta série", "${state.streak} jour${if (state.streak > 1) "s" else ""}", "Série en cours")
-            Feature("Tes instants", "${state.total} instant${if (state.total > 1) "s" else ""}", "Moments partagés")
+            Feature("Tes instants", "${state.totalCheckIns} instant${if (state.totalCheckIns > 1) "s" else ""}", "Moments partagés")
         }
     }
     Text("Ton wallet", fontSize = 19.sp, fontWeight = FontWeight.Bold)
     InfoCard(if (wallet == null) "Pas encore connecté" else "${wallet.take(6)}…${wallet.takeLast(6)}",
-        "Connecte ton wallet Solana. Les fonds de cette démo restent fictifs.")
+        "Connecte ton wallet Solana. Le SKR de ce déploiement est un mint de test sur devnet.")
     if (wallet == null) PrimaryButton(if (connecting) "Connexion…" else "Connecter mon wallet", enabled = !connecting, onClick = connect)
     if (error != null) Text(error, color = Purple, fontSize = 13.sp)
-    if (!state.faucetClaimed) {
-        InfoCard("Bienvenue dans le cercle.", "Récupère 100 SKR fictifs, puis choisis ta mise. Aucun frais et aucune signature.")
-        PrimaryButton("Recevoir 100 SKR démo", onClick = onFaucet)
-    } else if (state.exitUnlock == 0L) {
+    if (wallet == null) {
+        InfoCard("Connecte ton wallet.", "Ton profil, ta mise et ta série vivent dans des comptes Solana.")
+    } else if (!state.faucetClaimed) {
+        InfoCard("Bienvenue dans le cercle.", "Récupère 100 SKR de test, puis choisis ta mise. Ton wallet signera la transaction.")
+        PrimaryButton(if (connecting) "Transaction en cours…" else "Recevoir 100 SKR de test", enabled = !connecting, onClick = onFaucet)
+    } else if (state.exitUnlockAt == 0L) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(if (state.active) "Renforcer ma mise" else "Choisir ma mise", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("${money(state.available)} disponibles", color = Muted, fontSize = 11.sp)
+            Text("${money(state.tokenBalance)} disponibles", color = Muted, fontSize = 11.sp)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf(1_000L, 5_000L, 10_000L).forEach { choice ->
+            listOf(10 * SKR, 50 * SKR, 100 * SKR).forEach { choice ->
                 val selected = amount == choice
                 Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
                     .background(if (selected) Mint.copy(alpha = .12f) else Panel)
                     .border(1.dp, if (selected) Mint else Line, RoundedCornerShape(14.dp))
                     .clickable { amount = choice }.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                    Text("${choice / 100} SKR", color = if (selected) Mint else White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                    Text("${choice / SKR} SKR", color = if (selected) Mint else White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
-        PrimaryButton(if (amount > state.available) "Solde démo insuffisant" else "Miser ${amount / 100} SKR démo",
-            enabled = amount <= state.available, onClick = { onStake(amount) })
+        PrimaryButton(
+            if (amount > state.tokenBalance) "Solde insuffisant" else "Miser ${amount / SKR} SKR",
+            enabled = amount <= state.tokenBalance && !connecting,
+            onClick = { onStake(amount) },
+        )
     }
-    InfoCard("La régularité compte.", "Règles provisoires de la démo : −25 % par jour UTC manqué. Récompense de 1 % par check-in, plafonnée à 1 SKR et au pool disponible. Sortie après 48 h.")
-    if (state.exitUnlock > 0) {
-        val ready = now >= state.exitUnlock
-        InfoCard(if (ready) "Ta mise est disponible." else "Sortie dans ${countdown(state.exitUnlock - now)}",
+    InfoCard("La régularité compte.", "Paramètres provisoires : −25 % par jour UTC manqué. Récompense de 1 % par check-in, plafonnée à 1 SKR et au pool disponible. Sortie après 48 h.")
+    if (state.exitUnlockAt > 0) {
+        val ready = now >= state.exitUnlockAt
+        InfoCard(if (ready) "Ta mise est disponible." else "Sortie dans ${countdown(state.exitUnlockAt - now)}",
             "Déblocage le " + DateTimeFormatter.ofPattern("dd MMM à HH:mm 'UTC'", Locale.FRANCE).withZone(ZoneOffset.UTC)
-                .format(Instant.ofEpochSecond(state.exitUnlock)) +
+                .format(Instant.ofEpochSecond(state.exitUnlockAt)) +
                 if (ready) ". Aucun decay supplémentaire après le déblocage." else ". Continue à publier pour éviter les pertes pendant l’attente.")
-        PrimaryButton(if (ready) "Retirer ${money(state.staked)} SKR démo" else "Annuler la sortie", onClick = if (ready) onWithdraw else onCancel)
+        PrimaryButton(if (ready) "Retirer ${money(state.balance)} SKR" else "Annuler la sortie", onClick = if (ready) onWithdraw else onCancel)
     } else if (state.active) {
         OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
             Text("Demander ma sortie · 48 h", Modifier.padding(7.dp), color = White)
@@ -355,7 +374,7 @@ private fun Profile(state: DemoSession, now: Long, wallet: String?, connecting: 
 private fun Header() {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Wordmark()
-        Pill("Démo · aucun token réel", Muted)
+        Pill("Devnet · SKR de test", Muted)
     }
 }
 @Composable private fun Wordmark() {

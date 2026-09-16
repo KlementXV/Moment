@@ -28,7 +28,7 @@ object PhotoSanitizer {
             ByteArrayOutputStream().use { output ->
                 check(normalized.compress(Bitmap.CompressFormat.JPEG, 88, output))
                 withoutMetadata(output.toByteArray()).also {
-                    require(it.size <= SnapshotCodec.MAX_PHOTO_BYTES)
+                    require(it.size <= DraftCodec.MAX_PHOTO_BYTES)
                     require(hasNoMetadata(it))
                 }
             }

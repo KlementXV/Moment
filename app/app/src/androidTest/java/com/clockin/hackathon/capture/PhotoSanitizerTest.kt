@@ -86,7 +86,13 @@ class PhotoSanitizerTest {
                 init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                     .setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).setKeySize(256).build())
             }.generateKey()
-            val plain = SnapshotCodec.encode(LocalSnapshot())
+            val plain = DraftCodec.encode(
+                LocalDraft(
+                    day = 20_706L,
+                    photos = PhotoPair(byteArrayOf(1, 2, 3), byteArrayOf(4, 5, 6)),
+                    nonce = ByteArray(DraftCodec.NONCE_SIZE) { 7 },
+                )
+            )
             val first = LocalEncryption.encrypt(plain, key)
             val second = LocalEncryption.encrypt(plain, key)
             assertFalse(first.contentEquals(second))

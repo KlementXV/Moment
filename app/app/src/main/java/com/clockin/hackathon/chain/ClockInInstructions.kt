@@ -10,6 +10,27 @@ import com.solana.transaction.TransactionInstruction
 object ClockInInstructions {
     val SYSTEM_PROGRAM = SolanaPublicKey(ByteArray(32))
     val TOKEN_PROGRAM = SolanaPublicKey(Base58.decode("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"))
+    val ASSOCIATED_TOKEN_PROGRAM =
+        SolanaPublicKey(Base58.decode("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"))
+
+    /** Création idempotente du compte de tokens associé : réussit même s'il
+     * existe déjà, ce qui évite de sonder la chaîne avant chaque faucet. */
+    fun createAssociatedTokenAccount(
+        payer: SolanaPublicKey,
+        owner: SolanaPublicKey,
+        mint: SolanaPublicKey,
+    ) = TransactionInstruction(
+        ASSOCIATED_TOKEN_PROGRAM,
+        listOf(
+            AccountMeta(payer, true, true),
+            AccountMeta(ClockInAddresses.associatedToken(owner, mint), false, true),
+            AccountMeta(owner, false, false),
+            AccountMeta(mint, false, false),
+            AccountMeta(SYSTEM_PROGRAM, false, false),
+            AccountMeta(TOKEN_PROGRAM, false, false),
+        ),
+        byteArrayOf(1),
+    )
 
     fun createProfile(programId: SolanaPublicKey, owner: SolanaPublicKey) = TransactionInstruction(
         programId,
