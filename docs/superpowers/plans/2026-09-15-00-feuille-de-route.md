@@ -35,7 +35,15 @@ de ce document.
 | D4 | Autorisation de publication (§8.6) | **Co-signature de transaction** par `Config.publication_authority`. | `check_in` exige un second `Signer`. Liaison au post exacte (données d'instruction), expiration naturelle par le blockhash, rejeu bloqué par le PDA `CheckIn`. |
 | D5 | Économie simulée | `DemoSession` **supprimée**. | L'état on-chain est la source de vérité unique ; l'app lit `Config`/`Profile`/`CheckIn` par RPC. |
 | D6 | Jour UTC en paramètre | `day: i64` passé en argument d'instruction **et vérifié** contre `Clock`. | Nécessaire pour dériver le PDA `CheckIn` côté client. `require!(day == day_of(clock.unix_timestamp))` préserve la propriété §6 (« jamais décidé par le client »). |
-| D7 | Faucet | Permissionless, une fois par profil, `config.faucet_enabled` + `config.faucet_amount`. Autorité de mint du mint de test = PDA `Config`. | Pas de feature de compilation : le même binaire sert devnet et mainnet, l'admin coupe le faucet par configuration. |
+| D7 | Faucet | Permissionless, une fois par profil, `config.faucet_enabled` + `config.faucet_amount`. Autorité de mint du mint de test = PDA `Config`, **mais seulement à la fin du déploiement**. | Pas de feature de compilation : le même binaire sert devnet et mainnet, l'admin coupe le faucet par configuration. |
+
+**Correction du 2026-09-16 (D7).** Céder l'autorité de mint au PDA `Config` dès la
+création du mint bloque `seed_pool` : l'admin n'a alors aucun SKR à déposer, et
+aucun moyen d'en créer. L'ordre de déploiement est donc contraint — créer le mint
+avec l'admin pour autorité, s'approvisionner, amorcer le pool, **puis** céder
+l'autorité au programme. Après quoi seul le faucet peut créer du SKR. Les tests
+litesvm ne l'avaient pas vu : ils écrivent les soldes directement dans les comptes.
+`program/scripts/deploy-devnet.sh` applique cet ordre.
 
 Restent ouvertes et **non bloquantes** pour ces 3 semaines : §15.2 (calibrage exact
 des paramètres, valeurs de travail ci-dessous) et §15.3 (Seed Vault, spike timeboxé
