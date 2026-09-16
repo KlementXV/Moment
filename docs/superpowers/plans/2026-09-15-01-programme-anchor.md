@@ -2893,7 +2893,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-: "${PUBLICATION_AUTHORITY:?adresse publique de l'autorité de publication requise}"
+: "${PUBLICATION_AUTHORITY:?cle publique de publication requise}"
 
 solana config set --url devnet
 anchor build --arch v0

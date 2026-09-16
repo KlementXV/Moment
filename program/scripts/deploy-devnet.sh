@@ -11,21 +11,26 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-: "${PUBLICATION_AUTHORITY:?adresse publique de l'autorité de publication requise}"
+: "${PUBLICATION_AUTHORITY:?cle publique de publication requise}"
 SEED_AMOUNT="${SEED_AMOUNT:-500}"
 MINT_SUPPLY="${MINT_SUPPLY:-1000}"
 
 solana config set --url devnet >/dev/null
 
-echo "== 1. compilation et déploiement =="
+echo "== 1. compilation et deploiement =="
 anchor build --arch v0
-anchor deploy --provider.cluster devnet
-
 PROGRAM_ID=$(solana address -k target/deploy/clockin-keypair.json)
-CONFIG_PDA=$(node -e "
-const {PublicKey}=require('./scripts/node_modules/@solana/web3.js');
-console.log(PublicKey.findProgramAddressSync([Buffer.from('config')], new PublicKey('$PROGRAM_ID'))[0].toBase58());
-")
+
+# Redeployer coute la rente une seconde fois : on ne le fait que si besoin.
+if solana program show "$PROGRAM_ID" --url devnet >/dev/null 2>&1; then
+  echo "Programme deja deploye, etape sautee."
+else
+  anchor deploy --provider.cluster devnet
+fi
+
+# Derivation par le CLI Solana : @solana/web3.js v1 ne se charge pas en
+# CommonJS sous Node 20 (rpc-websockets tire uuid en ESM).
+CONFIG_PDA=$(solana find-program-derived-address "$PROGRAM_ID" string:config)
 
 echo "== 2. création du mint SKR de test (autorité : l'admin, provisoirement) =="
 MINT=$(spl-token create-token --decimals 9 --url devnet | awk '/Address:/ {print $2}')
