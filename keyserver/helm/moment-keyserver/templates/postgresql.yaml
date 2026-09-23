@@ -1,0 +1,63 @@
+{{- if .Values.postgresql.enabled }}
+{{- if and .Values.postgresql.synchronousReplication (lt (int .Values.postgresql.instances) 2) }}
+{{- fail "postgresql.synchronousReplication requires at least 2 instances" }}
+{{- end }}
+{{- if and .Values.postgresql.synchronousReplication (hasKey .Values.postgresql.parameters "synchronous_commit") (not (has (index .Values.postgresql.parameters "synchronous_commit") (list "on" "remote_apply"))) }}
+{{- fail "synchronous replication requires synchronous_commit=on or remote_apply" }}
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ include "moment.cluster" . }}
+  labels:
+    {{- include "moment.labels" . | nindent 4 }}
+  {{- if .Values.postgresql.keep }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  instances: {{ .Values.postgresql.instances }}
+  imageName: {{ .Values.postgresql.imageName | quote }}
+  enableSuperuserAccess: false
+  primaryUpdateStrategy: unsupervised
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgresql.database | quote }}
+      owner: {{ .Values.postgresql.owner | quote }}
+      {{- with .Values.postgresql.existingSecret }}
+      secret:
+        name: {{ . }}
+      {{- end }}
+  storage:
+    size: {{ .Values.postgresql.storage.size }}
+    {{- with .Values.postgresql.storage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  {{- if .Values.postgresql.walStorage.enabled }}
+  walStorage:
+    size: {{ .Values.postgresql.walStorage.size }}
+    {{- with .Values.postgresql.walStorage.storageClass }}
+    storageClass: {{ . | quote }}
+    {{- end }}
+  {{- end }}
+  resources:
+    {{- toYaml .Values.postgresql.resources | nindent 4 }}
+  affinity:
+    {{- toYaml .Values.postgresql.affinity | nindent 4 }}
+  postgresql:
+    {{- if .Values.postgresql.synchronousReplication }}
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: required
+    {{- end }}
+    parameters:
+      {{- toYaml .Values.postgresql.parameters | nindent 6 }}
+  {{- if .Values.postgresql.backup.enabled }}
+  plugins:
+    - name: barman-cloud.cloudnative-pg.io
+      isWALArchiver: true
+      parameters:
+        barmanObjectName: {{ include "moment.cluster" . }}-backup
+  {{- end }}
+{{- end }}

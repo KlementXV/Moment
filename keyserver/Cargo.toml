@@ -1,0 +1,43 @@
+[package]
+name = "moment-keyserver"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+publish = false
+
+[dependencies]
+aes-gcm = "0.10"
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
+bs58 = "0.5"
+bytes = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hex = "0.4"
+futures-util = "0.3"
+ipnet = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+object_store = { version = "0.12", features = ["aws"] }
+ort = { version = "=2.0.0-rc.10", default-features = false, features = ["std", "load-dynamic"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio-rustls", "migrate", "macros"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+solana-pubkey = { version = "2.4", features = ["curve25519"] }
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zeroize = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tempfile = "3"
+
+[profile.release]
+overflow-checks = true
+lto = "thin"
+

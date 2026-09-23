@@ -1,0 +1,7 @@
+apiVersion: v2
+name: moment-keyserver
+description: Rust Moment keyserver, private R2 storage and CloudNativePG PostgreSQL
+version: 0.1.0
+appVersion: "0.1.0"
+type: application
+kubeVersion: ">=1.28.0-0"

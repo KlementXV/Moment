@@ -1,0 +1,130 @@
+nameOverride: ""
+fullnameOverride: ""
+replicaCount: 2
+image:
+  repository: moment-keyserver
+  tag: "0.1.0"
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+# Secrets are provisioned outside Helm; no credentials enter the release record.
+existingSecret: moment-keyserver-secrets
+config:
+  network: devnet
+  programId: 7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1
+  authOrigin: https://moment.example.com
+  r2Endpoint: https://ACCOUNT_ID.r2.cloudflarestorage.com
+  r2Bucket: moment-devnet
+  allowUncalibratedModeration: false
+  modelPath: /app/assets/marqo-nsfw.onnx
+  policyPath: /app/assets/policy.json
+  ortLibraryPath: /opt/onnxruntime/lib/libonnxruntime.so
+  databaseMaxConnections: 10
+  # CIDRs of ingress/proxy peers only; never all clients or the entire Internet.
+  trustedProxyCidrs: []
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+service:
+  port: 8080
+podAnnotations: {}
+resources:
+  requests:
+    cpu: 250m
+    memory: 1Gi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpread:
+  enabled: true
+  topologyKey: kubernetes.io/hostname
+pdb:
+  enabled: true
+  minAvailable: 1
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: moment.example.com
+  tlsSecretName: ""
+postgresql:
+  enabled: true
+  clusterName: ""
+  keep: true
+  instances: 3
+  # Wait for one standby before acknowledging a commit. Disable only for local single-node tests.
+  synchronousReplication: true
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.11-minimal-trixie
+  database: moment
+  owner: moment
+  # Empty: operator generates <cluster>-app. Existing secret needs username/password.
+  existingSecret: ""
+  storage:
+    size: 20Gi
+    storageClass: ""
+  walStorage:
+    enabled: false
+    size: 10Gi
+    storageClass: ""
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 1Gi
+  parameters:
+    max_connections: "100"
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: preferred
+  monitoring:
+    enabled: false
+    labels: {}
+    interval: 30s
+  backup:
+    enabled: false
+    # A SEPARATE private bucket/path and credentials from app photos.
+    destinationPath: ""
+    endpointURL: ""
+    existingSecret: moment-postgresql-backup
+    accessKeyIdKey: access-key-id
+    secretAccessKeyKey: secret-access-key
+    retentionPolicy: 30d
+    schedule: "0 0 3 * * *"
+    immediate: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+externalPostgresql:
+  host: ""
+  port: 5432
+  database: moment
+  existingSecret: ""
+  caSecret: ""
+  caKey: ca.crt
+networkPolicy:
+  enabled: false
+  # Standard NetworkPolicy applies only to keyserver; CNPG is operator-managed.
+  # Empty means same-namespace clients only. Add your ingress controller selectors.
+  ingressFrom: []
+  dnsNamespaceSelector:
+    kubernetes.io/metadata.name: kube-system
+  dnsPodSelector:
+    k8s-app: kube-dns
+  # Add CIDRs for external PostgreSQL or special node-local DNS; HTTPS is allowed.
+  additionalEgress: []

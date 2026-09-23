@@ -1,0 +1,17 @@
+# Allowlist: never send wallets, .env, .git, databases or Android build outputs.
+**
+!keyserver/
+!keyserver/Cargo.toml
+!keyserver/Cargo.lock
+!keyserver/build.rs
+!keyserver/src/
+!keyserver/src/**
+!keyserver/migrations/
+!keyserver/migrations/**
+!app/
+!app/app/
+!app/app/src/
+!app/app/src/main/
+!app/app/src/main/assets/
+!app/app/src/main/assets/moderation/
+!app/app/src/main/assets/moderation/**

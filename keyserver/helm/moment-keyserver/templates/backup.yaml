@@ -1,0 +1,63 @@
+{{- if and .Values.postgresql.enabled .Values.postgresql.backup.enabled }}
+{{- if eq .Values.postgresql.backup.existingSecret .Values.existingSecret }}
+{{- fail "PostgreSQL backup credentials must use a separate Secret from application R2 credentials" }}
+{{- end }}
+{{- $backupBucket := first (splitList "/" (trimPrefix "s3://" .Values.postgresql.backup.destinationPath)) }}
+{{- if eq $backupBucket .Values.config.r2Bucket }}
+{{- fail "PostgreSQL backups must use a separate R2 bucket from application photos" }}
+{{- end }}
+apiVersion: barmancloud.cnpg.io/v1
+kind: ObjectStore
+metadata:
+  name: {{ include "moment.cluster" . }}-backup
+  labels:
+    {{- include "moment.labels" . | nindent 4 }}
+  {{- if .Values.postgresql.keep }}
+  annotations:
+    helm.sh/resource-policy: keep
+  {{- end }}
+spec:
+  retentionPolicy: {{ .Values.postgresql.backup.retentionPolicy | quote }}
+  configuration:
+    destinationPath: {{ required "postgresql.backup.destinationPath is required" .Values.postgresql.backup.destinationPath | quote }}
+    endpointURL: {{ required "postgresql.backup.endpointURL is required" .Values.postgresql.backup.endpointURL | quote }}
+    s3Credentials:
+      accessKeyId:
+        name: {{ .Values.postgresql.backup.existingSecret }}
+        key: {{ .Values.postgresql.backup.accessKeyIdKey }}
+      secretAccessKey:
+        name: {{ .Values.postgresql.backup.existingSecret }}
+        key: {{ .Values.postgresql.backup.secretAccessKeyKey }}
+    wal:
+      compression: gzip
+      maxParallel: 2
+    data:
+      compression: gzip
+      jobs: 2
+  instanceSidecarConfiguration:
+    env:
+      - name: AWS_DEFAULT_REGION
+        value: auto
+      - name: AWS_REQUEST_CHECKSUM_CALCULATION
+        value: when_required
+      - name: AWS_RESPONSE_CHECKSUM_VALIDATION
+        value: when_required
+    resources:
+      {{- toYaml .Values.postgresql.backup.resources | nindent 6 }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: {{ include "moment.cluster" . }}-daily
+  labels:
+    {{- include "moment.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.postgresql.backup.schedule | quote }}
+  immediate: {{ .Values.postgresql.backup.immediate }}
+  backupOwnerReference: none
+  cluster:
+    name: {{ include "moment.cluster" . }}
+  method: plugin
+  pluginConfiguration:
+    name: barman-cloud.cloudnative-pg.io
+{{- end }}

@@ -1,0 +1,35 @@
+{{- if and (eq .Values.config.network "mainnet") .Values.config.allowUncalibratedModeration }}
+{{- fail "Uncalibrated moderation is forbidden on mainnet" }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "moment.fullname" . }}
+  labels:
+    {{- include "moment.labels" . | nindent 4 }}
+data:
+  TRUSTED_PROXY_CIDRS: {{ join "," .Values.config.trustedProxyCidrs | quote }}
+  BIND_ADDR: "0.0.0.0:8080"
+  NETWORK: {{ .Values.config.network | quote }}
+  PROGRAM_ID: {{ .Values.config.programId | quote }}
+  AUTH_ORIGIN: {{ .Values.config.authOrigin | quote }}
+  BLOB_STORE: "r2"
+  R2_ENDPOINT: {{ .Values.config.r2Endpoint | quote }}
+  R2_BUCKET: {{ .Values.config.r2Bucket | quote }}
+  PUBLICATION_AUTHORITY_KEYPAIR: "/var/run/moment-secrets/publication-authority.json"
+  MODERATION_MODEL_PATH: {{ .Values.config.modelPath | quote }}
+  MODERATION_POLICY_PATH: {{ .Values.config.policyPath | quote }}
+  ORT_DYLIB_PATH: {{ .Values.config.ortLibraryPath | quote }}
+  ALLOW_UNCALIBRATED_MODERATION: {{ .Values.config.allowUncalibratedModeration | quote }}
+  DATABASE_MAX_CONNECTIONS: {{ .Values.config.databaseMaxConnections | quote }}
+  PGSSLMODE: "verify-full"
+  PGSSLROOTCERT: "/var/run/postgresql-ca/ca.crt"
+  {{- if .Values.postgresql.enabled }}
+  PGHOST: {{ printf "%s-rw.%s.svc" (include "moment.cluster" .) .Release.Namespace | quote }}
+  PGPORT: "5432"
+  PGDATABASE: {{ .Values.postgresql.database | quote }}
+  {{- else }}
+  PGHOST: {{ required "externalPostgresql.host is required" .Values.externalPostgresql.host | quote }}
+  PGPORT: {{ .Values.externalPostgresql.port | quote }}
+  PGDATABASE: {{ .Values.externalPostgresql.database | quote }}
+  {{- end }}

@@ -1,0 +1,17 @@
+name: moment-keyserver-test
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: moment
+      POSTGRES_PASSWORD: moment-local-test
+      POSTGRES_DB: moment_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moment -d moment_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
