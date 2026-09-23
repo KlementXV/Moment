@@ -1,0 +1,83 @@
+{
+  "model": "Marqo/nsfw-image-detection-384",
+  "revision": "0c26ec22111b83f106d72a55f611ec35962bcb65",
+  "license": "Apache-2.0",
+  "format": "FP32",
+  "sha256": "2d4f2ae32c5c201c620182566da7495014bdb47a2b66bf5de9d4ab8cff225bfc",
+  "bytes": 22484016,
+  "input": {
+    "name": "image",
+    "dtype": "uint8",
+    "shape": [
+      1,
+      384,
+      384,
+      3
+    ],
+    "color": "RGB"
+  },
+  "output": {
+    "name": "nsfw",
+    "shape": [
+      1
+    ],
+    "class_index": 0
+  },
+  "preprocessing": "pad-rgb128-bilinear-v1",
+  "opset": 17,
+  "versions": {
+    "torch": "2.6.0",
+    "torchvision": "0.21.0",
+    "timm": "1.0.15",
+    "onnx": "1.17.0",
+    "onnxruntime": "1.21.0",
+    "numpy": "2.2.4",
+    "pillow": "11.1.0",
+    "huggingface-hub": "0.29.3",
+    "safetensors": "0.5.3"
+  },
+  "validation": [
+    {
+      "image": "beignets.png",
+      "variant": "original",
+      "pytorch": 0.05817131698131561,
+      "ort": 0.05817131698131561,
+      "absolute_error": 0.0
+    },
+    {
+      "image": "beignets.png",
+      "variant": "portrait",
+      "pytorch": 0.05958188325166702,
+      "ort": 0.05958188325166702,
+      "absolute_error": 0.0
+    },
+    {
+      "image": "beignets.png",
+      "variant": "landscape",
+      "pytorch": 0.11366596072912216,
+      "ort": 0.11366619914770126,
+      "absolute_error": 2.384185791015625e-07
+    },
+    {
+      "image": "dog.jpg",
+      "variant": "original",
+      "pytorch": 0.07019654661417007,
+      "ort": 0.07019659876823425,
+      "absolute_error": 5.21540641784668e-08
+    },
+    {
+      "image": "dog.jpg",
+      "variant": "portrait",
+      "pytorch": 0.07910874485969543,
+      "ort": 0.0791088417172432,
+      "absolute_error": 9.685754776000977e-08
+    },
+    {
+      "image": "dog.jpg",
+      "variant": "landscape",
+      "pytorch": 0.09774839133024216,
+      "ort": 0.09774847328662872,
+      "absolute_error": 8.195638656616211e-08
+    }
+  ]
+}

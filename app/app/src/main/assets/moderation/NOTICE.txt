@@ -1,0 +1,7 @@
+Marqo/nsfw-image-detection-384
+Copyright: respective model authors (Marqo).
+Source: https://huggingface.co/Marqo/nsfw-image-detection-384
+Revision: 0c26ec22111b83f106d72a55f611ec35962bcb65
+License declared by model author: Apache-2.0 (see LICENSE.txt).
+Modified for Moment: exported to ONNX, RGB UINT8 NHWC normalization and NSFW softmax output added.
+Model scores are fallible. The included thresholds are experimental and uncalibrated.

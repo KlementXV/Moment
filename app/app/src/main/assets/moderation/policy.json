@@ -1,0 +1,9 @@
+{
+  "id": "experimental-pad-fp32-v1",
+  "preprocessing": "pad-rgb128-bilinear-v1",
+  "reviewThreshold": 0.5,
+  "blockThreshold": 0.9,
+  "calibrated": false,
+  "note": "Experimental UX thresholds, not validated production thresholds. Release publication remains disabled until calibration.",
+  "modelSha256": "2d4f2ae32c5c201c620182566da7495014bdb47a2b66bf5de9d4ab8cff225bfc"
+}
