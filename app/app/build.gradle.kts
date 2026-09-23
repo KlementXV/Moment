@@ -28,23 +28,16 @@ android {
         versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
+        buildConfigField("String", "IDENTITY_RPC_URL", setting("clockin.identityRpcUrl", "https://api.mainnet-beta.solana.com"))
         buildConfigField("String", "RPC_URL", setting("clockin.rpcUrl", "https://api.devnet.solana.com"))
         buildConfigField("String", "PROGRAM_ID", setting("clockin.programId", "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"))
         buildConfigField("String", "SKR_MINT", setting("clockin.skrMint", ""))
-        buildConfigField("String", "PUBLICATION_AUTHORITY", setting("clockin.publicationAuthority", ""))
+        buildConfigField("String", "BACKEND_URL", setting("clockin.backendUrl", ""))
         buildConfigField("String", "NETWORK", setting("clockin.network", "devnet"))
     }
 
     buildTypes {
-        debug {
-            // Béquille de semaine 1 : co-signature locale de check_in, retirée
-            // par le plan 03 quand le keyserver prend ce rôle.
-            buildConfigField("String", "DEV_AUTHORITY_SECRET", setting("clockin.devAuthoritySecret", ""))
-        }
-        release {
-            isMinifyEnabled = false
-            buildConfigField("String", "DEV_AUTHORITY_SECRET", "\"\"")
-        }
+        release { isMinifyEnabled = false }
     }
 
     compileOptions {
@@ -60,6 +53,8 @@ android {
 
 
 dependencies {
+    implementation("org.bouncycastle:bcprov-jdk18on:1.79")
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
@@ -72,7 +67,11 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
 
     // Solana Mobile Stack: Mobile Wallet Adapter + Kotlin client SDK
     implementation("com.solanamobile:mobile-wallet-adapter-clientlib-ktx:2.2.0")

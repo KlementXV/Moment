@@ -31,7 +31,7 @@ private data class AccountValue(val data: List<String> = emptyList(), val owner:
 private data class ProgramAccountEntry(val pubkey: String, val account: AccountValue)
 
 @Serializable
-private data class SignatureStatusValue(val confirmationStatus: String? = null)
+private data class SignatureStatusValue(val confirmationStatus: String? = null, val err: JsonElement? = null)
 
 @Serializable
 private data class TokenAmount(val amount: String = "0", val decimals: Int = 0)
@@ -50,14 +50,17 @@ class SolanaRpc(
             add(buildJsonObject { put("commitment", "confirmed") })
         }).value!!.blockhash
 
-    suspend fun accountData(address: SolanaPublicKey): ByteArray? =
+    suspend fun accountData(address: SolanaPublicKey, expectedOwner: SolanaPublicKey? = null): ByteArray? =
         call<Wrapped<AccountValue>>("getAccountInfo", buildJsonArray {
             add(address.base58())
             add(buildJsonObject {
                 put("encoding", "base64")
                 put("commitment", "confirmed")
             })
-        }).value?.let { Base64.getDecoder().decode(it.data.first()) }
+        }).value?.let {
+            require(expectedOwner == null || it.owner == expectedOwner.base58()) { "Propriétaire du compte incorrect." }
+            Base64.getDecoder().decode(it.data.first())
+        }
 
     /** Feed du jour : tous les comptes CheckIn du jour demandé (§4). */
     suspend fun checkInsForDay(programId: SolanaPublicKey, day: Long): List<CheckInAccount> =
@@ -116,7 +119,9 @@ class SolanaRpc(
                     add(buildJsonObject { put("searchTransactionHistory", true) })
                 },
             ).value.orEmpty()
-            val status = statuses.firstOrNull()?.confirmationStatus
+            val result = statuses.firstOrNull()
+            check(result?.err == null || result.err == kotlinx.serialization.json.JsonNull) { "La transaction a échoué sur Solana." }
+            val status = result?.confirmationStatus
             if (status == "confirmed" || status == "finalized") return true
             delay(1_500)
         }

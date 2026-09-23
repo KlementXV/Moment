@@ -22,6 +22,32 @@ private class FakeDriver(private val responses: MutableList<String>) : HttpNetwo
 class SolanaRpcTest {
     private val programId = SolanaPublicKey(Base58.decode("7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"))
 
+    @Test(expected = IllegalStateException::class)
+    fun confirmed_failed_transaction_is_not_successful() = runBlocking {
+        val driver = FakeDriver(mutableListOf(
+            """{"jsonrpc":"2.0","id":"1","result":{"context":{"slot":42},"value":[{"confirmationStatus":"confirmed","err":{"InstructionError":[0,"Custom"]}}]}}"""
+        ))
+        SolanaRpc("https://example.invalid", driver).awaitConfirmation("signature")
+        Unit
+    }
+
+    @Test
+    fun confirmed_successful_transaction_finishes() = runBlocking {
+        val driver = FakeDriver(mutableListOf(
+            """{"jsonrpc":"2.0","id":"1","result":{"context":{"slot":42},"value":[{"confirmationStatus":"confirmed","err":null}]}}"""
+        ))
+        assertTrue(SolanaRpc("https://example.invalid", driver).awaitConfirmation("signature"))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun wrong_account_program_is_rejected() = runBlocking {
+        val driver = FakeDriver(mutableListOf(
+            """{"jsonrpc":"2.0","id":"1","result":{"value":{"owner":"11111111111111111111111111111111","data":["AQ==","base64"]}}}"""
+        ))
+        SolanaRpc("https://example.invalid", driver).accountData(programId, programId)
+        Unit
+    }
+
     @Test
     fun reads_the_latest_blockhash() = runBlocking {
         val driver = FakeDriver(mutableListOf(

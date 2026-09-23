@@ -1,5 +1,15 @@
 # Keyserver, chiffrement et feed — Implementation Plan
 
+> **Mise à jour du 22 septembre 2026 :** le backend a été implémenté en **Rust**
+> à la demande du propriétaire, avec Axum, PostgreSQL / CloudNativePG,
+> ONNX Runtime natif et **R2**. Le Dockerfile et le chart Helm sont livrés.
+> [Implémentation, contrat HTTP et configuration](../../../keyserver/README.md).
+> Le TypeScript décrit ci-dessous reste une référence historique. Le branchement
+> Android est implémenté et testé localement : session wallet, paquet chiffré,
+> reprise durable, cosignature, confirmation et feed paginé vérifié.
+> Le [parcours physique](../../android-backend-integration.md) et le déploiement
+> distant restent à valider.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Rendre les photos réellement confidentielles et le feed réellement social : l'app chiffre le paquet images + manifeste + signature, le dépose dans un bucket privé via le keyserver, le keyserver vérifie la publication et co-signe la transaction `check_in`, puis distribue les clés aux membres qui ont eux-mêmes publié le jour même.

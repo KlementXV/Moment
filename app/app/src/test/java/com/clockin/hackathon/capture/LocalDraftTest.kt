@@ -26,6 +26,45 @@ class LocalDraftTest {
     }
 
     @Test
+    fun `a caption travels with the draft`() {
+        val before = sample().copy(caption = "Le café d’en bas, encore ouvert.")
+        val after = DraftCodec.decode(DraftCodec.encode(before))
+        assertEquals(before.caption, after.caption)
+    }
+
+    @Test
+    fun `a draft without caption decodes to an empty one`() {
+        assertEquals("", DraftCodec.decode(DraftCodec.encode(sample())).caption)
+    }
+
+    @Test
+    fun `a caption longer than the limit is refused`() {
+        val limit = "a".repeat(DraftCodec.MAX_CAPTION_CHARS)
+        DraftCodec.encode(sample().copy(caption = limit))
+        assertThrows(IllegalArgumentException::class.java) {
+            DraftCodec.encode(sample().copy(caption = limit + "a"))
+        }
+    }
+
+    @Test
+    fun `the caption is counted in code points, not in UTF-16 units`() {
+        // Un emoji hors du plan de base pèse deux `Char` : compter les `Char`
+        // rejetterait une légende que l'écran, lui, accepte.
+        val emoji = "\uD83C\uDF05".repeat(DraftCodec.MAX_CAPTION_CHARS)
+        val decoded = DraftCodec.decode(DraftCodec.encode(sample().copy(caption = emoji)))
+        assertEquals(emoji, decoded.caption)
+    }
+
+    @Test
+    fun `a draft of the previous format is not readable`() {
+        // MOM2 ignorait la légende : le relire comme un MOM3 inventerait un
+        // champ. Un brouillon a au plus un jour — le perdre est sans gravité.
+        val bytes = DraftCodec.encode(sample())
+        bytes[3] = '2'.code.toByte()
+        assertThrows(IllegalArgumentException::class.java) { DraftCodec.decode(bytes) }
+    }
+
+    @Test
     fun `a modified image hash is rejected`() {
         val bytes = DraftCodec.encode(sample())
         bytes[bytes.lastIndex] = (bytes.last().toInt() xor 1).toByte()

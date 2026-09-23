@@ -1,5 +1,8 @@
 package com.clockin.hackathon.wallet
 
+import com.clockin.hackathon.i18n.Message
+import com.clockin.hackathon.i18n.tr
+
 import com.clockin.hackathon.provenance.PostManifest
 import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import com.solana.mobilewalletadapter.clientlib.MobileWalletAdapter
@@ -7,12 +10,16 @@ import com.solana.mobilewalletadapter.clientlib.TransactionResult
 import com.solana.publickey.SolanaPublicKey
 import kotlinx.coroutines.CancellationException
 
-enum class WalletFailure(val message: String) {
-    NoWallet("Aucun wallet compatible trouvé. Installe un wallet Solana Mobile, puis réessaie."),
-    NoAccount("Le wallet n’a fourni aucun compte."),
-    Cancelled("Signature interrompue. Tu peux réessayer depuis ton wallet."),
-    NotConnected("Connecte ton wallet pour continuer."),
-    Unexpected("Wallet indisponible. Réessaie dans un instant."),
+enum class WalletFailure {
+    NoWallet, NoAccount, Cancelled, NotConnected, Unexpected;
+
+    val message: String get() = tr(when (this) {
+        NoWallet -> Message.WalletNoWallet
+        NoAccount -> Message.WalletNoAccount
+        Cancelled -> Message.WalletCancelled
+        NotConnected -> Message.WalletNotConnected
+        Unexpected -> Message.WalletUnexpected
+    })
 }
 
 class WalletException(val failure: WalletFailure) : Exception(failure.message)
@@ -58,11 +65,13 @@ class WalletSession(
 
     /** Signature détachée du manifeste (§7) : le wallet signe des octets, pas
      * une transaction. C'est ce qui lie la paire d'images à son propriétaire. */
-    suspend fun signManifest(manifest: PostManifest): Result<ByteArray> {
+    suspend fun signManifest(manifest: PostManifest): Result<ByteArray> = signMessage(manifest.serialize())
+
+    suspend fun signMessage(message: ByteArray): Result<ByteArray> {
         val wallet = address ?: return Result.failure(WalletException(WalletFailure.NotConnected))
         return wrap {
             adapter.transact(sender) { _ ->
-                val result = signMessagesDetached(arrayOf(manifest.serialize()), arrayOf(wallet.bytes))
+                val result = signMessagesDetached(arrayOf(message), arrayOf(wallet.bytes))
                 val signature = result.messages.first().signatures.first()
                 require(signature.size == 64) { "signature de taille inattendue" }
                 signature
