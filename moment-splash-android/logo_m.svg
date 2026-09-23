@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="100 109 321 281">
+<defs><linearGradient id="brand" x1="110" y1="190" x2="400" y2="380" gradientUnits="userSpaceOnUse">
+<stop offset="0" stop-color="#FCC45F"/><stop offset="0.5" stop-color="#F58A63"/><stop offset="1" stop-color="#EE4C80"/></linearGradient></defs>
+<path d="M137 380 V262 A58 58 0 0 1 253 262 V380 M253 262 A58 58 0 0 1 369 262 V380" fill="none" stroke="url(#brand)" stroke-width="54" stroke-linejoin="round"/>
+<path d="M357,146 a27,27 0 1,0 54,0 a27,27 0 1,0 -54,0" fill="#EE5A7C"/>
+</svg>

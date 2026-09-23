@@ -1,8 +1,11 @@
 package com.clockin.hackathon.ui
 
+import com.clockin.hackathon.i18n.Message
+import com.clockin.hackathon.i18n.tr
+import com.clockin.hackathon.i18n.AppLanguage
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -12,12 +15,10 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.Canvas
@@ -30,25 +31,32 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.blur
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.clockin.hackathon.ChainState
 import com.clockin.hackathon.ClockInModel
@@ -56,334 +64,321 @@ import com.clockin.hackathon.SKR
 import com.clockin.hackathon.capture.PhotoPair
 import kotlinx.coroutines.delay
 import java.time.Instant
-import java.time.ZoneOffset
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 
-internal val Ink = Color(0xFF080A0C)
-internal val Panel = Color(0xFF15181C)
-internal val Muted = Color(0xFFA1A6AF)
-internal val Mint = Color(0xFF8AEAC5)
-internal val Purple = Color(0xFFC2B5F5)
-internal val Line = Color(0xFF292D33)
-internal val White = Color(0xFFF4F3EF)
-internal val Shape = RoundedCornerShape(28.dp)
 /** Le mint SKR de test a 9 décimales. On en affiche deux, sans arrondi trompeur. */
-private fun money(value: Long) = String.format(Locale.FRANCE, "%.2f", value / SKR.toDouble())
-private const val DAY_SECONDS = 86_400L
-private fun countdown(seconds: Long): String {
+internal fun money(value: Long) = String.format(AppLanguage.locale, "%.2f", value / SKR.toDouble())
+/** Même montant, mais sans décimales quand il n'y en a pas : « 50 SKR », pas « 50,00 SKR ». */
+internal fun skr(value: Long) = if (value % SKR == 0L) "${value / SKR}" else money(value)
+/**
+ * Un montant tapé à la main, en unités de base.
+ *
+ * La virgule française vaut le point. Au-delà des neuf décimales du mint, les
+ * chiffres sont coupés plutôt qu'arrondis : arrondir inventerait des unités que
+ * la chaîne ne sait pas représenter. Renvoie `null` si ce n'est pas un montant.
+ */
+internal fun parseSkrAmount(text: String): Long? {
+    val cleaned = text.replace(',', '.').trim()
+    val parts = cleaned.split('.')
+    if (parts.size > 2) return null
+    val whole = parts[0]
+    val fraction = parts.getOrNull(1).orEmpty()
+    // « , » seul n'est pas zéro : c'est une saisie encore vide des deux côtés.
+    if (whole.isEmpty() && fraction.isEmpty()) return null
+    if (whole.any { !it.isDigit() } || fraction.any { !it.isDigit() }) return null
+    val units = whole.ifEmpty { "0" }.toLongOrNull() ?: return null
+    if (units > Long.MAX_VALUE / SKR) return null
+    return units * SKR + fraction.take(9).padEnd(9, '0').toLong()
+}
+
+/**
+ * Le même montant, tel qu'on le remet dans le champ.
+ *
+ * [skr] s'arrête à deux décimales : suffisant pour lire un solde, destructeur
+ * pour une saisie — reformater « 0,000000001 » en « 0,00 » effacerait ce que la
+ * personne vient de taper. Ici les neuf décimales tiennent, zéros inutiles ôtés.
+ */
+internal fun formatSkrInput(value: Long): String {
+    val units = value / SKR
+    val fraction = (value % SKR).toString().padStart(9, '0').trimEnd('0')
+    return if (fraction.isEmpty()) "$units" else "$units${java.text.DecimalFormatSymbols.getInstance(AppLanguage.locale).decimalSeparator}$fraction"
+}
+
+internal const val DAY_SECONDS = 86_400L
+internal fun countdown(seconds: Long): String {
     val s = seconds.coerceAtLeast(0)
     return "%02d:%02d:%02d".format(s / 3600, s % 3600 / 60, s % 60)
 }
 
+internal enum class MomentPage { Home, Profile }
+
 @Composable
 fun MomentApp(model: ClockInModel) {
-    var entered by rememberSaveable { mutableStateOf(false) }
-    var page by rememberSaveable { mutableStateOf("feed") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val original = androidx.compose.ui.platform.LocalConfiguration.current
+    val configuration = remember(original, AppLanguage.code) {
+        android.content.res.Configuration(original).apply { setLocale(AppLanguage.locale) }
+    }
+    val resources = remember(context, configuration) {
+        context.createConfigurationContext(configuration).resources
+    }
+    CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalConfiguration provides configuration,
+        androidx.compose.ui.platform.LocalResources provides resources,
+    ) { MomentContent(model) }
+}
+
+@Composable
+private fun MomentContent(model: ClockInModel) {
+    var page by rememberSaveable { mutableStateOf(MomentPage.Home) }
+    var captureOpen by rememberSaveable { mutableStateOf(false) }
+    var now by remember { mutableLongStateOf(Instant.now().epochSecond) }
     val state = model.state
     val wallet = model.walletAddress
-    LaunchedEffect(state.loaded) { if (state.loaded && state.faucetClaimed) entered = true }
-    var now by remember { mutableLongStateOf(Instant.now().epochSecond) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val identities = remember(context) { context.getSharedPreferences("profile_identity", android.content.Context.MODE_PRIVATE) }
+    var nickname by remember(wallet) { mutableStateOf(wallet?.let { identities.getString(it, "") }.orEmpty()) }
+    var skrName by remember(wallet) { mutableStateOf<String?>(null) }
+    var skrLoading by remember(wallet) { mutableStateOf(false) }
+    var skrFailed by remember(wallet) { mutableStateOf(false) }
+    var skrRetry by remember(wallet) { mutableIntStateOf(0) }
+    val resolver = remember { com.clockin.hackathon.chain.SkrResolver(com.clockin.hackathon.BuildConfig.IDENTITY_RPC_URL) }
+    LaunchedEffect(wallet, skrRetry) {
+        if (wallet != null) {
+            skrLoading = true
+            skrFailed = false
+            try {
+                skrName = resolver.resolve(wallet)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                skrFailed = true
+            } finally {
+                skrLoading = false
+            }
+        }
+    }
+    // Préférence d'affichage, pas d'état de chaîne : elle vaut pour l'appareil,
+    // pas pour le wallet, et survit à une déconnexion.
+    val demoPrefs = remember(context) { context.getSharedPreferences("demo", android.content.Context.MODE_PRIVATE) }
+    var demoFeed by remember { mutableStateOf(demoPrefs.getBoolean("fakeFeed", false)) }
+    val setDemoFeed: (Boolean) -> Unit = { value ->
+        demoPrefs.edit().putBoolean("fakeFeed", value).apply(); demoFeed = value
+    }
+    // Les favoris sont lus ici, pas dans le fil : le profil les retire, le fil
+    // les affiche, et deux copies indépendantes de la même préférence
+    // divergeraient dès le premier retrait.
+    val favoritePrefs = remember(context) { context.getSharedPreferences("favorites", android.content.Context.MODE_PRIVATE) }
+    var favorites by remember { mutableStateOf(favoritePrefs.getStringSet("names", emptySet()).orEmpty()) }
+    val toggleFavorite: (String) -> Unit = { name ->
+        favorites = (if (name in favorites) favorites - name else favorites + name)
+            .also { favoritePrefs.edit().putStringSet("names", it).apply() }
+    }
+    val onboarding = remember(context) { context.getSharedPreferences("onboarding", android.content.Context.MODE_PRIVATE) }
+    var completed by remember(wallet) { mutableStateOf(wallet != null && onboarding.getBoolean(wallet, false)) }
+    // Le parcours ne s'achève pas sur une préférence locale mais sur une mise
+    // réellement en jeu : sans elle `canPublish` restera faux, et le fil se
+    // refermerait sur un wallet connecté sans aucune sortie. Tant que la chaîne
+    // n'a pas répondu, on ne conclut rien — sinon l'écran clignoterait.
+    val staked = !state.loaded || state.active
+    val entered = wallet != null && completed && staked
+    // Les écrans d'explication ont déjà été vus : le parcours reprend droit à
+    // la seule étape qui manque.
+    val resumeAtStake = wallet != null && completed && state.loaded && !state.active
+    val saveNickname: (String) -> Unit = { value ->
+        wallet?.let { identities.edit().putString(it, value).apply(); nickname = value }
+    }
+    LaunchedEffect(entered) { if (!entered) { captureOpen = false; page = MomentPage.Home } }
     var confirmExit by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { while (true) { now = Instant.now().epochSecond; delay(1000) } }
     // Relecture de la chaîne au passage d'un jour UTC : le feed et la fenêtre
     // de publication changent à minuit, pas à l'heure locale.
+    LaunchedEffect(wallet, state.posted, state.day) { if (wallet != null && state.posted) model.loadFeed() }
     LaunchedEffect(wallet, now / DAY_SECONDS) { if (wallet != null) model.refresh() }
-    val posted = state.posted
-    val unlocked = state.feedUnlocked
-    BackHandler(entered && page != "feed") { page = "feed" }
-    MaterialTheme(colorScheme = darkColorScheme(primary = Mint, secondary = Purple,
-        background = Ink, surface = Panel, onPrimary = Ink, onSurface = White, onBackground = White),
+    val posted = state.posted && state.day == Math.floorDiv(now, DAY_SECONDS)
+    val unlocked = posted
+    LaunchedEffect(posted) { if (posted) captureOpen = false }
+    BackHandler(entered && !captureOpen && page != MomentPage.Home) { page = MomentPage.Home }
+    MaterialTheme(colorScheme = darkColorScheme(
+        primary = Accent, onPrimary = OnBrand,
+        primaryContainer = AccentContainer, onPrimaryContainer = OnAccentContainer,
+        secondary = Rose, onSecondary = OnBrand,
+        background = Ink, onBackground = White,
+        surface = Panel, onSurface = White,
+        surfaceVariant = SurfaceHigh, onSurfaceVariant = Muted,
+        outline = Outline, outlineVariant = Line,
+        error = Danger, onError = OnBrand,
+        errorContainer = DangerContainer, onErrorContainer = OnDangerContainer),
         typography = Typography(
-            bodyLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 16.sp, lineHeight = 24.sp),
-            bodyMedium = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 14.sp, lineHeight = 21.sp),
-            labelLarge = TextStyle(fontFamily = FontFamily.SansSerif, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            bodyLarge = BodyLg, bodyMedium = BodyMd, bodySmall = BodySm,
+            titleMedium = TitleMd, titleSmall = TitleSm,
+            headlineLarge = HeadlineLg, headlineSmall = HeadlineSm,
+            labelLarge = TextStyle(fontSize = 15.sp, fontWeight = FontWeight.Medium),
         )) {
-        Surface(color = Ink, modifier = Modifier.fillMaxSize()) {
-            if (wallet != null && !state.loaded) {
+        Column(Modifier.fillMaxSize().background(Ink)) {
+        Surface(color = Ink, modifier = Modifier.weight(1f).fillMaxWidth()) {
+            if (!entered) {
+                Onboarding(wallet, state, now, model.busy, model.error,
+                    resumeAtStake = resumeAtStake,
+                    onConnect = model::connect, onStake = model::stake,
+                    onFaucet = model::claimFaucet, onDisconnect = model::disconnect) { openCapture ->
+                    wallet?.let { address ->
+                        onboarding.edit().putBoolean(address, true).apply()
+                        completed = true
+                        captureOpen = openCapture
+                    }
+                }
+            } else if (!state.loaded) {
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(28.dp), verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (model.error == null) CircularProgressIndicator(color = Mint)
+                    if (model.error == null) CircularProgressIndicator(color = Accent)
                     else {
-                        InfoCard("Lecture de la chaîne", model.error!!)
+                        InfoCard(tr(Message.ReadingTheBlockchain), model.error!!)
                         Spacer(Modifier.height(20.dp))
-                        PrimaryButton("Réessayer", enabled = !model.busy, onClick = model::refresh)
+                        PrimaryButton(tr(Message.TryAgain), enabled = !model.busy, loading = model.busy, onClick = model::refresh)
                     }
                 }
             } else {
-            AnimatedContent(targetState = entered, transitionSpec = {
-                fadeIn(tween(300)) togetherWith fadeOut(tween(180))
-            }, label = "welcome") { isEntered ->
-            if (!isEntered) {
-                Welcome(wallet, model.busy, model.error, model::connect) { entered = true }
-            } else {
-                Scaffold(containerColor = Ink, contentWindowInsets = WindowInsets.safeDrawing,
-                    bottomBar = { BottomBar(page) { page = it } }) { padding ->
-                    Column(Modifier.fillMaxSize().padding(padding)) {
-                        Box(Modifier.padding(horizontal = 26.dp, vertical = 14.dp)) { Header() }
+                // Le bas est volontairement absent : le corps descend jusqu'au bord de
+                // l'écran et la barre flotte par-dessus. Ce que le Scaffold réserve pour
+                // elle redescend plus bas, dans le contenu du défilement.
+                Scaffold(containerColor = Ink,
+                    contentWindowInsets = WindowInsets.safeDrawing,
+                    bottomBar = { DailyNavigation(page, posted,
+                        onHome = { page = MomentPage.Home }, onCapture = { captureOpen = true }) }) { padding ->
+                    val direction = LocalLayoutDirection.current
+                    Column(Modifier.fillMaxSize().padding(
+                        start = padding.calculateStartPadding(direction),
+                        top = padding.calculateTopPadding(),
+                        end = padding.calculateEndPadding(direction))) {
+                        when (page) {
+                            MomentPage.Home -> FeedTopBar(
+                                nickname.ifBlank { skrName.orEmpty() }, posted,
+                                onSearch = null,
+                                onProfile = { page = MomentPage.Profile },
+                            )
+                            MomentPage.Profile -> Row(Modifier.fillMaxWidth().height(64.dp)
+                                .padding(start = 8.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                IconButton(onClick = { page = MomentPage.Home }) {
+                                    Icon(Icons.AutoMirrored.Outlined.ArrowBack,
+                                        contentDescription = tr(Message.BackToFeed), tint = White)
+                                }
+                                Text(tr(Message.Profile), style = HeadlineSm, fontSize = 20.sp)
+                            }
+                        }
                         AnimatedContent(targetState = page, modifier = Modifier.weight(1f),
                             transitionSpec = {
                                 (fadeIn(tween(260, delayMillis = 60)) + slideInVertically(tween(320)) { it / 35 }) togetherWith
                                     fadeOut(tween(120))
                             }, label = "navigation") { currentPage ->
-                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                            .padding(horizontal = 26.dp).padding(top = 18.dp, bottom = 24.dp),
-                            verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                        when (currentPage) {
-                            "feed" -> Feed(state, now, unlocked, posted,
-                                photos = model.draft,
-                                onCapture = { page = if (state.canPublish(now)) "capture" else "profile" },
-                                onProfile = { page = "profile" })
-                            "capture" -> Capture(state, now, posted, model, onProfile = { page = "profile" },
-                                onPublish = { model.publish { page = "feed" } })
-                            "profile" -> Profile(state, now, wallet, model.busy, model.error, model::connect,
-                                onFaucet = model::claimFaucet,
-                                onStake = model::stake,
-                                onExit = { confirmExit = true },
-                                onCancel = model::cancelExit,
-                                onWithdraw = model::finalizeExit)
-                        }
+                        // La hauteur de la barre devient une marge du contenu, pas du
+                        // conteneur : le dernier élément reste atteignable, et tout ce
+                        // qui défile passe dessous.
+                        BoxWithConstraints(Modifier.fillMaxSize()) {
+                            // Le verrou ne défile pas : il prend toute la hauteur libre,
+                            // se centre dedans, et son décor flouté passe sous le verre de
+                            // la barre. Ce qui défile, lui, garde la marge qui laisse le
+                            // dernier élément atteignable au-dessus de la barre.
+                            val locked = currentPage == MomentPage.Home && !unlocked
+                            val minimumHeight = if (locked) maxHeight
+                                else (maxHeight - 42.dp - padding.calculateBottomPadding()).coerceAtLeast(0.dp)
+                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState(),
+                                enabled = !locked)
+                                // Le fil respire à 16 dp comme la maquette ; le profil,
+                                // qui est du texte en colonne, garde sa gouttière large.
+                                .padding(horizontal = if (currentPage == MomentPage.Home) 16.dp else 26.dp)
+                                .padding(top = if (locked) 0.dp else 8.dp,
+                                    bottom = if (locked) 0.dp else 24.dp + padding.calculateBottomPadding())
+                                .heightIn(min = minimumHeight),
+                                verticalArrangement = if (currentPage == MomentPage.Home && !unlocked) Arrangement.Center
+                                    else Arrangement.spacedBy(24.dp)) {
+                                when (currentPage) {
+                                    MomentPage.Home -> Column {
+                                        if (model.hasPendingPublication) {
+                                            Text(tr(Message.ResumePendingExplanation), style = BodySm, color = Muted)
+                                            TextButton(enabled = !model.busy && !model.feedLoading,
+                                                onClick = { model.publish { captureOpen = false } }) {
+                                                Text(tr(Message.ResumePending))
+                                            }
+                                        }
+                                        Feed(state, now, unlocked, demo = demoFeed,
+                                        remote = model.remoteFeed,
+                                        loading = model.feedLoading,
+                                        hasMore = model.feedCursor != null,
+                                        onRefresh = { model.loadFeed() },
+                                        onMore = { model.loadFeed(more = true) },
+                                        photos = model.draft,
+                                        caption = model.caption,
+                                        favorites = favorites,
+                                        onToggleFavorite = toggleFavorite,
+                                        minimumHeight = minimumHeight,
+                                        onCapture = { captureOpen = true },
+                                        onProfile = { page = MomentPage.Profile })
+                                    }
+                                    MomentPage.Profile -> Profile(state, now, wallet, model.busy, model.error,
+                                        nickname = nickname,
+                                        skrName = skrName,
+                                        skrLoading = skrLoading,
+                                        skrFailed = skrFailed,
+                                        favorites = favorites,
+                                        onToggleFavorite = toggleFavorite,
+                                        onRetrySkr = { skrRetry++ },
+                                        onNicknameChange = saveNickname,
+                                        onConnect = model::connect,
+                                        onDisconnect = model::disconnect,
+                                        onFaucet = model::claimFaucet,
+                                        onStake = model::stake,
+                                        onExit = { confirmExit = true },
+                                        onCancel = model::cancelExit,
+                                        onWithdraw = model::finalizeExit,
+                                        demoFeed = demoFeed,
+                                        onDemoFeedChange = setDemoFeed)
+                                }
+                            }
                         }
                     }
                     }
                 }
             }
-            }
-            }
-            if (state.loaded && model.error != null) AlertDialog(onDismissRequest = model::dismissError,
-                title = { Text("Le Moment n’est pas perdu.") }, text = { Text(model.error!!) },
-                confirmButton = { TextButton(onClick = model::dismissError) { Text("Compris") } })
+            if (entered && captureOpen) CaptureSheet(
+                state = state,
+                now = now,
+                draft = model.draft,
+                busy = model.busy,
+                onDraft = model::replaceDraft,
+                onPublish = { acknowledged, caption ->
+                    model.publish(acknowledged, caption) { captureOpen = false; page = MomentPage.Home }
+                },
+                moderation = model.moderation,
+                onRetryModeration = model::retryModeration,
+                onProfile = { captureOpen = false; page = MomentPage.Profile },
+                onDismiss = { captureOpen = false },
+            )
+            if (entered && (state.loaded || captureOpen) && model.error != null) AlertDialog(onDismissRequest = model::dismissError,
+                title = { Text(tr(Message.YourMomentIsSafe)) }, text = { Text(model.error!!) },
+                confirmButton = { TextButton(onClick = model::dismissError) { Text(tr(Message.GotIt)) } })
             if (confirmExit) AlertDialog(onDismissRequest = { confirmExit = false },
-                containerColor = Panel, title = { Text("Lancer les 48 heures ?") },
-                text = { Text("Ta mise reste active pendant l’attente. Continue tes check-ins : chaque jour UTC manqué réduit le solde de 25 %. Ce taux est provisoire.") },
+                containerColor = Panel,
+                title = { Text(tr(Message.StartWithdrawalWait, (state.config?.withdrawalDelaySeconds ?: 172_800L) / 3600)) },
+                text = { Text(tr(Message.WithdrawalWarning, state.decayBps / 100)) },
                 confirmButton = { TextButton(onClick = {
                     model.requestExit(); confirmExit = false
-                }) { Text("Demander la sortie") } },
-                dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("Rester") } })
+                }) { Text(tr(Message.RequestWithdrawal)) } },
+                dismissButton = { TextButton(onClick = { confirmExit = false }) { Text(tr(Message.Stay)) } })
         }
+    }
     }
 }
 
-@Composable
-private fun Welcome(wallet: String?, connecting: Boolean, error: String?, connect: () -> Unit, enter: () -> Unit) {
-    Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState())
-        .padding(horizontal = 28.dp, vertical = 20.dp), horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically) {
-            Wordmark()
-            Pill("Pour les Seekers", Purple)
-        }
-        Spacer(Modifier.height(12.dp))
-        Text("La vie passe.\nGarde un Moment.", fontSize = 41.sp, lineHeight = 46.sp,
-            fontWeight = FontWeight.SemiBold, letterSpacing = (-1.8).sp, textAlign = TextAlign.Center)
-        Text("Toi. Ton quotidien. Tes proches.\nUn instant sincère, chaque jour.",
-            color = Muted, fontSize = 16.sp, lineHeight = 25.sp, textAlign = TextAlign.Center)
-        Box(Modifier.fillMaxWidth().height(300.dp), contentAlignment = Alignment.Center) {
-            Canvas(Modifier.matchParentSize()) {
-                drawCircle(Brush.radialGradient(listOf(Purple.copy(alpha = .16f), Color.Transparent),
-                    center = center, radius = size.maxDimension * .55f), size.maxDimension * .55f)
-            }
-            DualFrame(Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(280.dp)
-                .graphicsLayer { rotationZ = -3f }, caption = "Les deux côtés d’un même instant")
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(5.dp).background(Mint, CircleShape))
-            Text("Deux caméras. Une fois par jour.", color = Muted, fontSize = 13.sp)
-        }
-        PrimaryButton("Découvrir Moment", onClick = enter)
-        TextButton(onClick = connect, enabled = !connecting && wallet == null,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
-            if (connecting) {
-                CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Mint)
-                Spacer(Modifier.width(10.dp))
-            }
-            Text(if (wallet != null) "Wallet connecté · ${wallet.take(4)}…${wallet.takeLast(4)}"
-                else if (connecting) "Connexion…" else "Connecter mon wallet", color = Muted)
-        }
-        if (error != null) Text(error, color = Purple, fontSize = 13.sp)
-        Text("Caméra réelle · Devnet · SKR de test", color = Muted,
-            fontSize = 11.sp, textAlign = TextAlign.Center)
-    }
-}
 
-@Composable
-private fun Feature(number: String, title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text(number, color = Mint, fontSize = 10.sp)
-        Text(title, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text(subtitle, color = Muted, fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun Feed(state: ChainState, now: Long, unlocked: Boolean, posted: Boolean, photos: PhotoPair?, onCapture: () -> Unit, onProfile: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        Text(DateTimeFormatter.ofPattern("EEEE d MMMM", Locale.FRANCE).withZone(ZoneOffset.UTC)
-            .format(Instant.ofEpochSecond(now)).uppercase(Locale.FRANCE) + " · UTC", color = Muted, fontSize = 10.sp,
-            letterSpacing = 1.5.sp, fontWeight = FontWeight.Medium)
-        Text(if (unlocked) "Tu y es." else "Un jour.\nUn nouveau Moment.",
-            fontSize = 34.sp, lineHeight = 37.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
-    }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Panel).padding(17.dp),
-        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(if (posted) "À demain" else "Prends ton temps", color = Mint, fontSize = 10.sp, letterSpacing = 1.sp)
-            Text(if (posted) "Ton Moment est inscrit on-chain" else "Clôture dans ${countdown(DAY_SECONDS - now % DAY_SECONDS)}",
-                fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-        }
-        Glyph(if (posted) "check" else "clock", Mint)
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Text("Les Seekers", fontSize = 19.sp, fontWeight = FontWeight.Bold)
-        Text("Aujourd’hui", color = Muted, fontSize = 10.sp, letterSpacing = 1.sp)
-    }
-    if (unlocked) {
-        PostCard("toi", "Aujourd’hui · série de ${state.streak}", "Un petit moment. Une bonne habitude.", true, photos)
-        Text(
-            "Les Moments des autres arrivent avec le serveur de clés : leurs photos sont chiffrées, " +
-                "et personne ne peut les lire sans clé.",
-            color = Muted, fontSize = 12.sp, lineHeight = 18.sp,
-        )
-    } else {
-        Box(Modifier.fillMaxWidth().heightIn(min = 330.dp).clip(Shape).background(Panel)) {
-            Landscape(Modifier.matchParentSize())
-            Box(Modifier.matchParentSize().background(Ink.copy(alpha = .82f)))
-            Column(Modifier.align(Alignment.Center).fillMaxWidth().padding(horizontal = 24.dp).padding(top = 32.dp, bottom = 56.dp), horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Box(Modifier.size(54.dp).clip(CircleShape).background(Mint.copy(alpha = .10f)), contentAlignment = Alignment.Center) {
-                    Glyph("lock", Mint)
-                }
-                Text("Un Moment à partager.", fontWeight = FontWeight.Bold, fontSize = 19.sp, textAlign = TextAlign.Center)
-                Text("Partage un instant de ta journée\npour découvrir celui des autres.", color = Muted,
-                    fontSize = 14.sp, lineHeight = 21.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                PrimaryButton(if (state.canPublish(now)) "Partager mon Moment" else "Préparer ma mise", onClick = onCapture)
-            }
-            Text("Illustration · en attente de ton Moment", Modifier.align(Alignment.BottomCenter).padding(13.dp), color = Muted, fontSize = 9.sp, letterSpacing = 2.sp)
-        }
-    }
-    Row(Modifier.fillMaxWidth().clickable(onClick = onProfile).padding(vertical = 3.dp),
-        horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("${state.streak} jour${if (state.streak > 1) "s" else ""} de série", color = Purple, fontSize = 13.sp)
-        Text("${money(state.balance)} SKR misés  ↗", color = Muted, fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun Capture(state: ChainState, now: Long, posted: Boolean, model: ClockInModel,
-    onProfile: () -> Unit, onPublish: () -> Unit) {
-    Text("Ton Moment.", fontSize = 34.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-1).sp)
-    Text("Deux points de vue. Un seul souvenir.", color = Muted, fontSize = 15.sp)
-    when {
-        posted -> {
-            model.draft?.let { PhotoPairView(it, Modifier.fillMaxWidth().height(360.dp)) }
-            InfoCard(
-                "C’est fait pour aujourd’hui.",
-                "Ton Moment est inscrit on-chain. Prochain rendez-vous à 00:00 UTC.",
-            )
-        }
-        state.exitUnlockAt > 0 && now >= state.exitUnlockAt -> {
-            InfoCard("Ta sortie est prête.", "Retire ta mise depuis ton profil avant de commencer une nouvelle position.")
-            PrimaryButton("Voir mon profil", onClick = onProfile)
-        }
-        !state.active || state.balance < state.minStake -> {
-            InfoCard(
-                "Une petite mise pour commencer.",
-                "Il faut au moins ${money(state.minStake)} SKR misés pour publier.",
-            )
-            PrimaryButton("Préparer ma mise", onClick = onProfile)
-        }
-        else -> CameraCapture(model.draft, model.busy, model::replaceDraft, onPublish)
-    }
-}
-
-@Composable
-private fun Profile(state: ChainState, now: Long, wallet: String?, connecting: Boolean, error: String?, connect: () -> Unit,
-    onFaucet: () -> Unit, onStake: (Long) -> Unit, onExit: () -> Unit, onCancel: () -> Unit, onWithdraw: () -> Unit) {
-    var amount by rememberSaveable { mutableLongStateOf(50 * SKR) }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
-        Box(Modifier.size(60.dp).clip(RoundedCornerShape(20.dp)).background(Brush.linearGradient(listOf(Purple, Mint))), contentAlignment = Alignment.Center) {
-            Text("S", color = Ink, fontWeight = FontWeight.Black, fontSize = 28.sp)
-        }
-        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("À ton rythme.", fontSize = 26.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.5).sp)
-            Text("Seeker, un jour à la fois.", color = Muted, fontSize = 13.sp)
-        }
-    }
-    Column(Modifier.fillMaxWidth().clip(Shape).background(Brush.linearGradient(listOf(Color(0xFF1B2B29), Panel)))
-        .border(1.dp, Mint.copy(alpha = .12f), Shape).padding(23.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Mise on-chain", color = Mint, fontSize = 10.sp, letterSpacing = 2.sp)
-        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(money(state.balance), fontSize = 43.sp, fontWeight = FontWeight.Bold, letterSpacing = (-2).sp)
-            Text("SKR", Modifier.padding(bottom = 8.dp), color = Mint, fontWeight = FontWeight.Medium)
-        }
-        HorizontalDivider(color = Mint.copy(alpha = .15f))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Feature("Ta série", "${state.streak} jour${if (state.streak > 1) "s" else ""}", "Série en cours")
-            Feature("Tes instants", "${state.totalCheckIns} instant${if (state.totalCheckIns > 1) "s" else ""}", "Moments partagés")
-        }
-    }
-    Text("Ton wallet", fontSize = 19.sp, fontWeight = FontWeight.Bold)
-    InfoCard(if (wallet == null) "Pas encore connecté" else "${wallet.take(6)}…${wallet.takeLast(6)}",
-        "Connecte ton wallet Solana. Le SKR de ce déploiement est un mint de test sur devnet.")
-    if (wallet == null) PrimaryButton(if (connecting) "Connexion…" else "Connecter mon wallet", enabled = !connecting, onClick = connect)
-    if (error != null) Text(error, color = Purple, fontSize = 13.sp)
-    if (wallet == null) {
-        InfoCard("Connecte ton wallet.", "Ton profil, ta mise et ta série vivent dans des comptes Solana.")
-    } else if (!state.faucetClaimed) {
-        InfoCard("Bienvenue dans le cercle.", "Récupère 100 SKR de test, puis choisis ta mise. Ton wallet signera la transaction.")
-        PrimaryButton(if (connecting) "Transaction en cours…" else "Recevoir 100 SKR de test", enabled = !connecting, onClick = onFaucet)
-    } else if (state.exitUnlockAt == 0L) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(if (state.active) "Renforcer ma mise" else "Choisir ma mise", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-            Text("${money(state.tokenBalance)} disponibles", color = Muted, fontSize = 11.sp)
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf(10 * SKR, 50 * SKR, 100 * SKR).forEach { choice ->
-                val selected = amount == choice
-                Box(Modifier.weight(1f).clip(RoundedCornerShape(14.dp))
-                    .background(if (selected) Mint.copy(alpha = .12f) else Panel)
-                    .border(1.dp, if (selected) Mint else Line, RoundedCornerShape(14.dp))
-                    .clickable { amount = choice }.padding(vertical = 16.dp), contentAlignment = Alignment.Center) {
-                    Text("${choice / SKR} SKR", color = if (selected) Mint else White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                }
-            }
-        }
-        PrimaryButton(
-            if (amount > state.tokenBalance) "Solde insuffisant" else "Miser ${amount / SKR} SKR",
-            enabled = amount <= state.tokenBalance && !connecting,
-            onClick = { onStake(amount) },
-        )
-    }
-    InfoCard("La régularité compte.", "Paramètres provisoires : −25 % par jour UTC manqué. Récompense de 1 % par check-in, plafonnée à 1 SKR et au pool disponible. Sortie après 48 h.")
-    if (state.exitUnlockAt > 0) {
-        val ready = now >= state.exitUnlockAt
-        InfoCard(if (ready) "Ta mise est disponible." else "Sortie dans ${countdown(state.exitUnlockAt - now)}",
-            "Déblocage le " + DateTimeFormatter.ofPattern("dd MMM à HH:mm 'UTC'", Locale.FRANCE).withZone(ZoneOffset.UTC)
-                .format(Instant.ofEpochSecond(state.exitUnlockAt)) +
-                if (ready) ". Aucun decay supplémentaire après le déblocage." else ". Continue à publier pour éviter les pertes pendant l’attente.")
-        PrimaryButton(if (ready) "Retirer ${money(state.balance)} SKR" else "Annuler la sortie", onClick = if (ready) onWithdraw else onCancel)
-    } else if (state.active) {
-        OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-            Text("Demander ma sortie · 48 h", Modifier.padding(7.dp), color = White)
-        }
-    }
-}
-
-@Composable
-private fun Header() {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-        Wordmark()
-        Pill("Devnet · SKR de test", Muted)
-    }
-}
-@Composable private fun Wordmark() {
+@Composable internal fun Wordmark() {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Canvas(Modifier.size(24.dp)) {
-            drawCircle(Brush.linearGradient(listOf(Mint, Purple)), size.width * .38f,
+            drawCircle(GradientBrand, size.width * .38f,
                 style = Stroke(size.width * .12f))
             drawCircle(Ink, size.width * .14f, Offset(size.width * .78f, size.height * .23f))
-            drawCircle(Mint, size.width * .10f, Offset(size.width * .78f, size.height * .23f))
+            drawCircle(Coral, size.width * .10f, Offset(size.width * .78f, size.height * .23f))
         }
         Text("Moment", fontSize = 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-.8).sp)
     }
@@ -392,7 +387,7 @@ private fun Header() {
     Text(text, Modifier.clip(CircleShape).background(color.copy(alpha = .07f)).padding(horizontal = 11.dp, vertical = 7.dp),
         color = color, fontSize = 10.sp, fontWeight = FontWeight.Medium)
 }
-@Composable internal fun PrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+@Composable internal fun PrimaryButton(text: String, enabled: Boolean = true, loading: Boolean = false, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) .975f else 1f,
@@ -407,9 +402,18 @@ private fun Header() {
             onClick()
         }
     },
-        enabled = enabled, interactionSource = interaction,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).graphicsLayer { scaleX = scale; scaleY = scale },
-        shape = CircleShape, colors = ButtonDefaults.buttonColors(containerColor = White, contentColor = Ink)) {
+        enabled = enabled && !loading, interactionSource = interaction,
+        // Le dégradé est peint par le modifier : `Button` ne sait pas remplir
+        // avec un `Brush`. Désactivé, il laisse place à une surface sourde.
+        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).graphicsLayer { scaleX = scale; scaleY = scale }
+            .background(if (enabled) GradientBrand else SolidColor(SurfaceHigh), CircleShape),
+        shape = CircleShape, colors = ButtonDefaults.buttonColors(
+            containerColor = Color.Transparent, contentColor = OnBrand,
+            disabledContainerColor = Color.Transparent, disabledContentColor = Muted)) {
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = OnBrand)
+            Spacer(Modifier.width(10.dp))
+        }
         Text(text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
     }
 }
@@ -420,98 +424,7 @@ private fun Header() {
         Text(body, color = Muted, fontSize = 13.sp, lineHeight = 20.sp)
     }
 }
-@Composable private fun BottomBar(page: String, navigate: (String) -> Unit) {
-    val haptic = LocalHapticFeedback.current
-    Box(Modifier.fillMaxWidth().background(Ink).navigationBarsPadding().padding(horizontal = 24.dp, vertical = 10.dp)) {
-        Row(Modifier.fillMaxWidth().height(70.dp).clip(CircleShape)
-            .background(Brush.verticalGradient(listOf(Color(0xFF22262C), Panel)))
-            .border(.5.dp, White.copy(alpha = .12f), CircleShape).padding(6.dp).selectableGroup(),
-            horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            listOf(Triple("feed", "grid", "Le cercle"), Triple("capture", "camera", "Capturer"), Triple("profile", "person", "Moi")).forEach { (key, icon, label) ->
-                val selected = page == key
-                val background by animateColorAsState(if (selected) White.copy(alpha = .10f) else Color.Transparent,
-                    tween(220), label = "tabSurface")
-                val foreground by animateColorAsState(if (selected) Mint else Muted, tween(220), label = "tabColor")
-                Column(Modifier.weight(1f).fillMaxHeight().clip(CircleShape).background(background)
-                    .selectable(selected = selected, role = Role.Tab, onClick = {
-                        if (!selected) { haptic.performHapticFeedback(HapticFeedbackType.SegmentTick); navigate(key) }
-                    }), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                    Glyph(icon, foreground)
-                    Spacer(Modifier.height(4.dp))
-                    Text(label, color = foreground, fontSize = 10.sp, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-                }
-            }
-        }
-    }
-}
-@Composable private fun PostCard(name: String, subtitle: String, caption: String, self: Boolean, photos: PhotoPair? = null) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.size(36.dp).clip(CircleShape).background(if (self) Mint else Purple), contentAlignment = Alignment.Center) {
-                Text(name.take(1).uppercase(), color = Ink, fontWeight = FontWeight.Bold)
-            }
-            Column(Modifier.weight(1f)) {
-                Text(name, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(subtitle, color = Muted, fontSize = 10.sp)
-            }
-            Pill("Démo", if (self) Mint else Purple)
-        }
-        if (photos != null) PhotoPairView(photos, Modifier.fillMaxWidth().height(340.dp))
-        else DualFrame(Modifier.fillMaxWidth().height(340.dp), caption = "Un instant, deux regards", alternate = !self)
-        Text(caption, fontSize = 14.sp)
-        Spacer(Modifier.height(6.dp))
-    }
-}
-
-/** Deliberately illustrative assets: no network, gallery import or camera access in the demo. */
-@Composable private fun DualFrame(modifier: Modifier, caption: String, alternate: Boolean = false) {
-    Box(modifier.clip(Shape).background(Panel)) {
-        Landscape(Modifier.fillMaxSize(), alternate)
-        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Ink.copy(alpha = .55f)))))
-        Box(Modifier.padding(15.dp).size(86.dp, 112.dp).clip(RoundedCornerShape(16.dp)).border(2.dp, White, RoundedCornerShape(16.dp))) {
-            Portrait(Modifier.fillMaxSize())
-            Text("AVANT", Modifier.align(Alignment.BottomCenter).padding(8.dp), color = White, fontSize = 7.sp, letterSpacing = 1.sp)
-        }
-        Text(caption, Modifier.align(Alignment.BottomStart).padding(19.dp), color = White, fontSize = 9.sp,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-        Box(Modifier.align(Alignment.TopEnd).padding(15.dp)) { Pill("Illustration", White) }
-    }
-}
-@Composable private fun Landscape(modifier: Modifier, alternate: Boolean = false) {
-    Canvas(modifier.semantics { contentDescription = "Illustration de montagnes au coucher du soleil, exemple de caméra arrière" }) {
-        val w = size.width; val h = size.height
-        drawRect(Brush.verticalGradient(if (alternate) listOf(Color(0xFF8170B4), Color(0xFFEEBB9B), Color(0xFF334C4E))
-            else listOf(Color(0xFF617D91), Color(0xFFE1B998), Color(0xFF45665D))))
-        drawCircle(Color(0xFFFFDAB0), w * .10f, Offset(w * .73f, h * .28f))
-        fun ridge(color: Color, points: List<Pair<Float, Float>>) {
-            drawPath(Path().apply { moveTo(0f, h); points.forEach { (x, y) -> lineTo(x * w, y * h) }; lineTo(w, h); close() }, color)
-        }
-        ridge(Color(0xFF627977), listOf(0f to .55f, .16f to .39f, .28f to .48f, .54f to .30f, .7f to .46f, 1f to .37f))
-        ridge(Color(0xFF355B55), listOf(0f to .62f, .25f to .48f, .5f to .69f, .75f to .53f, 1f to .66f))
-        ridge(Color(0xFF193E37), listOf(0f to .73f, .2f to .8f, .46f to .67f, .78f to .78f, 1f to .63f))
-        val trail = Path().apply { moveTo(w * .45f, h); cubicTo(w * .2f, h * .84f, w * .85f, h * .81f, w * .59f, h * .70f) }
-        drawPath(trail, Color(0xFFB1AA81), style = Stroke(w * .04f, cap = StrokeCap.Round))
-        for (i in 0..13) {
-            val x = w * (i / 13f); val y = h * (.83f + (i % 3) * .04f)
-            val tree = Path().apply { moveTo(x, y - h * .12f); lineTo(x - w * .035f, y); lineTo(x + w * .035f, y); close() }
-            drawPath(tree, Color(0xFF102D29))
-        }
-    }
-}
-@Composable private fun Portrait(modifier: Modifier) {
-    Canvas(modifier.semantics { contentDescription = "Portrait illustré, exemple de caméra avant" }) {
-        val w = size.width; val h = size.height
-        drawRect(Brush.verticalGradient(listOf(Color(0xFFABA4D4), Color(0xFF5A6582))))
-        drawOval(Color(0xFF253B39), Offset(-w * .1f, h * .62f), Size(w * 1.2f, h * .6f))
-        drawRoundRect(Color(0xFFBE8668), Offset(w * .4f, h * .5f), Size(w * .2f, h * .22f), androidx.compose.ui.geometry.CornerRadius(8f))
-        drawOval(Color(0xFFDAA383), Offset(w * .24f, h * .20f), Size(w * .53f, h * .40f))
-        drawArc(Color(0xFF252524), 170f, 210f, true, Offset(w * .20f, h * .12f), Size(w * .59f, h * .35f))
-        drawLine(Ink, Offset(w * .34f, h * .37f), Offset(w * .42f, h * .37f), 3f)
-        drawLine(Ink, Offset(w * .58f, h * .37f), Offset(w * .66f, h * .37f), 3f)
-        drawArc(Color(0xFF805846), 0f, 160f, false, Offset(w * .43f, h * .44f), Size(w * .14f, h * .07f), style = Stroke(2f))
-    }
-}
-@Composable private fun Glyph(kind: String, color: Color) {
+@Composable internal fun Glyph(kind: String, color: Color) {
     Canvas(Modifier.size(24.dp)) {
         scale(size.width / 24f, size.height / 24f, pivot = Offset.Zero) {
             val stroke = Stroke(1.7f, cap = StrokeCap.Round)
@@ -527,8 +440,25 @@ private fun Header() {
                     drawCircle(color,4f,Offset(12f,7f),style=stroke)
                     drawArc(color,180f,180f,false,Offset(4f,14f),Size(16f,14f),style=stroke)
                 }
+                "close" -> { line(6f,6f,18f,18f); line(18f,6f,6f,18f) }
+                "back" -> { line(20f,12f,4f,12f); line(4f,12f,11f,5f); line(4f,12f,11f,19f) }
+                "retry" -> {
+                    drawArc(color, 45f, 285f, false, Offset(4f,4f), Size(16f,16f), style = stroke)
+                    line(20f,3f,20f,9f); line(20f,9f,14f,9f)
+                }
                 "clock" -> { drawCircle(color,9f,Offset(12f,12f),style=stroke); line(12f,7f,12f,12f); line(12f,12f,16f,14f) }
                 "check" -> { line(5f,12f,10f,17f); line(10f,17f,20f,6f) }
+                "pool" -> {
+                    drawOval(color, Offset(4f,4f), Size(16f,6f), style = stroke)
+                    line(4f,7f,4f,15f); line(20f,7f,20f,15f)
+                    drawArc(color, 0f, 180f, false, Offset(4f,8f), Size(16f,6f), style = stroke)
+                    drawArc(color, 0f, 180f, false, Offset(4f,12f), Size(16f,6f), style = stroke)
+                }
+                "copy" -> {
+                    drawRoundRect(color, Offset(9f,9f), Size(11f,11f), androidx.compose.ui.geometry.CornerRadius(2.5f), style = stroke)
+                    drawPath(Path().apply { moveTo(15f,6f); lineTo(15f,4.5f); quadraticTo(15f,4f,14.5f,4f); lineTo(5.5f,4f)
+                        quadraticTo(5f,4f,5f,4.5f); lineTo(5f,14.5f); quadraticTo(5f,15f,5.5f,15f); lineTo(7f,15f) }, color, style = stroke)
+                }
                 "lock" -> {
                     drawRoundRect(color,Offset(4f,10f),Size(16f,12f),androidx.compose.ui.geometry.CornerRadius(3f),style=stroke)
                     drawArc(color,180f,180f,false,Offset(7f,2f),Size(10f,16f),style=stroke)
