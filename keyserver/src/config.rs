@@ -21,6 +21,8 @@ pub struct Settings {
     pub policy: PathBuf,
     pub ort_library: PathBuf,
     pub allow_uncalibrated: bool,
+    /// Fee payer of the daily `reap` crank; `None` disables the crank.
+    pub crank: Option<SigningKey>,
 }
 pub enum Storage {
     Local(String),
@@ -70,21 +72,9 @@ impl Settings {
         if origin.query().is_some() || origin.path() != "/" {
             bail!("AUTH_ORIGIN doit être une origine sans chemin ni query");
         }
-        let bytes = Zeroizing::new(
-            std::fs::read(required("PUBLICATION_AUTHORITY_KEYPAIR")?)
-                .context("Impossible de lire la clé de publication")?,
-        );
-        let decoded: Zeroizing<Vec<u8>> = Zeroizing::new(
-            serde_json::from_slice(&bytes).context("Format de clé Solana invalide")?,
-        );
-        let pair: Zeroizing<[u8; 64]> = Zeroizing::new(
-            decoded
-                .as_slice()
-                .try_into()
-                .context("La clé Solana doit contenir 64 octets")?,
-        );
-        let authority =
-            SigningKey::from_keypair_bytes(&pair).context("Clé de publication incohérente")?;
+        let authority = load_keypair(&required("PUBLICATION_AUTHORITY_KEYPAIR")?)
+            .context("Clé de publication illisible")?;
+        let crank = crank_key(env::var("CRANK_KEYPAIR").ok(), &authority)?;
         let encoded = Zeroizing::new(required("KEY_ENCRYPTION_KEY")?);
         let master_key = Zeroizing::new(
             key64(&encoded)
@@ -175,6 +165,71 @@ impl Settings {
             policy: required("MODERATION_POLICY_PATH")?.into(),
             ort_library: required("ORT_DYLIB_PATH")?.into(),
             allow_uncalibrated,
+            crank,
         })
+    }
+}
+
+/// Solana CLI keypair file: a JSON array of 64 bytes.
+fn load_keypair(path: &str) -> anyhow::Result<SigningKey> {
+    let bytes = Zeroizing::new(std::fs::read(path).context("Impossible de lire la clé")?);
+    let decoded: Zeroizing<Vec<u8>> =
+        Zeroizing::new(serde_json::from_slice(&bytes).context("Format de clé Solana invalide")?);
+    let pair: Zeroizing<[u8; 64]> = Zeroizing::new(
+        decoded
+            .as_slice()
+            .try_into()
+            .context("La clé Solana doit contenir 64 octets")?,
+    );
+    SigningKey::from_keypair_bytes(&pair).context("Clé Solana incohérente")
+}
+
+/// The crank pays fees from its own key: the co-signing key stays off that path.
+fn crank_key(path: Option<String>, authority: &SigningKey) -> anyhow::Result<Option<SigningKey>> {
+    let Some(path) = path.filter(|p| !p.trim().is_empty()) else {
+        return Ok(None);
+    };
+    let key = load_keypair(&path).context("CRANK_KEYPAIR illisible")?;
+    if key.verifying_key() == authority.verifying_key() {
+        bail!("CRANK_KEYPAIR doit être distincte de la clé de publication");
+    }
+    Ok(Some(key))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn keyfile(seed: u8) -> tempfile::NamedTempFile {
+        let key = SigningKey::from_bytes(&[seed; 32]);
+        let mut file = tempfile::NamedTempFile::new().unwrap();
+        let bytes: Vec<u8> = key.to_keypair_bytes().to_vec();
+        write!(file, "{}", serde_json::to_string(&bytes).unwrap()).unwrap();
+        file
+    }
+
+    #[test]
+    fn the_crank_is_optional() {
+        let authority = SigningKey::from_bytes(&[1; 32]);
+        assert!(crank_key(None, &authority).unwrap().is_none());
+        assert!(crank_key(Some("  ".into()), &authority).unwrap().is_none());
+    }
+
+    #[test]
+    fn the_crank_key_is_loaded_from_a_solana_keypair_file() {
+        let authority = SigningKey::from_bytes(&[1; 32]);
+        let file = keyfile(2);
+        let key = crank_key(Some(file.path().to_string_lossy().into()), &authority)
+            .unwrap()
+            .unwrap();
+        assert_eq!(key.to_bytes(), [2; 32]);
+    }
+
+    #[test]
+    fn the_crank_never_reuses_the_publication_authority() {
+        let authority = SigningKey::from_bytes(&[1; 32]);
+        let file = keyfile(1);
+        assert!(crank_key(Some(file.path().to_string_lossy().into()), &authority).is_err());
     }
 }

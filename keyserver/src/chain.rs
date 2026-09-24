@@ -360,6 +360,9 @@ impl RpcChain {
         Ok(())
     }
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_limited(method, params, 32_768).await
+    }
+    async fn rpc_limited(&self, method: &str, params: Value, max_bytes: usize) -> Result<Value> {
         let body = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
         let mut retries = RATE_LIMIT_RETRIES.iter();
         let mut response = loop {
@@ -382,7 +385,7 @@ impl RpcChain {
         }
         let mut body = Vec::new();
         while let Some(chunk) = response.chunk().await.map_err(|_| Error::unavailable())? {
-            if body.len() + chunk.len() > 32_768 {
+            if body.len() + chunk.len() > max_bytes {
                 return Err(Error::unavailable());
             }
             body.extend_from_slice(&chunk);
@@ -503,6 +506,54 @@ impl Chain for RpcChain {
         .get("value")
         .and_then(Value::as_bool)
         .ok_or_else(Error::unavailable)
+    }
+}
+
+/// Largest `getProgramAccounts` answer the crank accepts (~40k profiles).
+const PROFILES_MAX_BYTES: usize = 8 * 1024 * 1024;
+#[async_trait]
+impl crate::crank::CrankChain for RpcChain {
+    async fn config(&self) -> Result<Config> {
+        Chain::config(self).await
+    }
+    async fn profiles(&self) -> Result<Vec<Profile>> {
+        let filters = json!([
+            {"dataSize": PROFILE_LEN},
+            {"memcmp": {"offset": 0, "bytes": bs58::encode(discriminator("account:Profile")).into_string()}}
+        ]);
+        let result = self
+            .rpc_limited(
+                "getProgramAccounts",
+                json!([protocol::address_string(&self.program), {"encoding":"base64","commitment":"confirmed","filters":filters}]),
+                PROFILES_MAX_BYTES,
+            )
+            .await?;
+        let entries = result.as_array().ok_or_else(Error::unavailable)?;
+        // One unreadable account must not stop the others from being settled.
+        Ok(entries
+            .iter()
+            .filter_map(|entry| entry["account"]["data"][0].as_str())
+            .filter_map(|data| protocol::unbase64(data, PROFILE_LEN).ok())
+            .filter_map(|bytes| decode_profile(&bytes).ok())
+            .map(|(profile, _)| profile)
+            .collect())
+    }
+    async fn latest_blockhash(&self) -> Result<Key> {
+        let result = self
+            .rpc("getLatestBlockhash", json!([{"commitment":"confirmed"}]))
+            .await?;
+        let hash = result["value"]["blockhash"]
+            .as_str()
+            .ok_or_else(Error::unavailable)?;
+        protocol::address(hash).map_err(|_| Error::unavailable())
+    }
+    async fn send_transaction(&self, raw: &[u8]) -> Result<()> {
+        self.rpc(
+            "sendTransaction",
+            json!([protocol::b64(raw), {"encoding":"base64","preflightCommitment":"confirmed"}]),
+        )
+        .await
+        .map(|_| ())
     }
 }
 
@@ -937,6 +988,20 @@ mod tests {
         assert_eq!(check.commitment, [4; 32]);
         assert_eq!(check.blob_ref, [5; 32]);
         assert!(chain.profile([10; 32]).await.is_err());
+        task.abort();
+    }
+    #[tokio::test]
+    async fn crank_lists_profiles_and_skips_unreadable_ones() {
+        use crate::crank::CrankChain;
+        let good = protocol::b64(&layout("profile"));
+        let (chain, task) = mock_rpc(json!({"result": [
+            {"pubkey": "x", "account": {"data": [good, "base64"]}},
+            {"pubkey": "y", "account": {"data": [protocol::b64(&[1, 2, 3]), "base64"]}},
+        ]}))
+        .await;
+        let profiles = chain.profiles().await.unwrap();
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].owner, [5; 32]);
         task.abort();
     }
     async fn mock_rpc(response: Value) -> (RpcChain, tokio::task::JoinHandle<()>) {

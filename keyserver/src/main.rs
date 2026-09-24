@@ -61,6 +61,7 @@ async fn main() -> anyhow::Result<()> {
     if settings.allow_uncalibrated {
         tracing::warn!("Modération expérimentale activée sur devnet : seuils non calibrés");
     }
+    let crank_chain = chain.clone();
     let app = Arc::new(App {
         db,
         blobs: Arc::new(blobs),
@@ -73,6 +74,13 @@ async fn main() -> anyhow::Result<()> {
         authority: settings.authority,
         inference_slots: Arc::new(Semaphore::new(1)),
     });
+    match settings.crank {
+        Some(signer) => {
+            tokio::spawn(moment_keyserver::crank::run(crank_chain, settings.program, signer));
+            tracing::info!("Crank reap actif (00:05 et clôture + 5 min UTC)");
+        }
+        None => tracing::info!("Crank reap désactivé : CRANK_KEYPAIR absent"),
+    }
     let listener = tokio::net::TcpListener::bind(settings.bind)
         .await
         .context("Écoute HTTP impossible")?;
