@@ -19,6 +19,7 @@ import com.clockin.hackathon.ChainState
 import com.clockin.hackathon.SKR
 import com.clockin.hackathon.chain.CheckInAccount
 import com.clockin.hackathon.chain.ConfigAccount
+import com.clockin.hackathon.chain.DayPoolAccount
 import com.clockin.hackathon.chain.ProfileAccount
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -40,21 +41,27 @@ class ProfileScreenTest {
 
     private fun config() = ConfigAccount(
         admin = ByteArray(32), publicationAuthority = ByteArray(32), skrMint = ByteArray(32),
-        vault = ByteArray(32), poolBalance = 290 * SKR, minStake = 500 * SKR,
-        rewardCap = 10 * SKR, faucetAmount = 100 * SKR, withdrawalDelaySeconds = 172_800L,
-        rewardRateBps = 100, decayBps = 2_500, maxDecayDays = 30, faucetEnabled = true,
+        vault = ByteArray(32), minStake = 500 * SKR, faucetAmount = 100 * SKR,
+        withdrawalDelaySeconds = 172_800L, poolCloseDelaySeconds = 21_600L,
+        decayBps = 2_500, maxDecayDays = 30, faucetEnabled = true,
     )
 
-    private fun profile(staked: Long, exitUnlockAt: Long = 0) = ProfileAccount(
+    private fun profile(staked: Long, exitUnlockAt: Long = 0, pendingDays: List<Long> = listOf(-1, -1),
+                        pendingStakes: List<Long> = listOf(0, 0)) = ProfileAccount(
         owner = ByteArray(32), staked = staked, settledDay = today - 1, lastCheckInDay = today - 1,
         exitRequestedAt = if (exitUnlockAt > 0) morning else 0, exitUnlockAt = exitUnlockAt,
         totalCheckIns = 4, streak = 4, active = true, faucetClaimed = true,
+        pendingDays = pendingDays, pendingStakes = pendingStakes,
     )
+
+    /** Pool du jour : 30 SKR de pénalités pour 1 000 SKR de mises déjà publiées. */
+    private val todayPool = DayPoolAccount(today, penalties = 30 * SKR, totalStake = 1_000 * SKR, winnersCount = 2)
 
     private fun state(staked: Long, exitUnlockAt: Long = 0, posted: Boolean = false) = ChainState(
         config = config(), profile = profile(staked, exitUnlockAt),
         todayCheckIn = if (posted) CheckInAccount(ByteArray(32), today, ByteArray(32), ByteArray(32), 1, 4) else null,
         tokenBalance = 1_284 * SKR, day = today, loaded = true,
+        pools = mapOf(today to todayPool), now = morning,
     )
 
     private fun screen(
@@ -114,10 +121,24 @@ class ProfileScreenTest {
         show(screen(state(500 * SKR)))
         // Le total et son unité sont deux nœuds : la maquette les aligne sur
         // la ligne de base, avec deux tailles différentes.
-        compose.onNodeWithText("290").assertExists()
+        compose.onNodeWithText("30").assertExists()
         compose.onNodeWithText("Ta part si tu publies").assertExists()
-        // 1 % de 500 SKR, sous le plafond de 10.
-        compose.onNodeWithText("5 SKR").assertExists()
+        // 30 SKR × 500 / (1 000 + 500) : sa mise s'ajoute au total s'il publie.
+        compose.onNodeWithText("10 SKR").assertExists()
+    }
+
+    @Test fun an_open_claim_shows_the_pending_gain_and_no_immediate_reward() {
+        // Publié hier ; à 03:00 UTC le pool d'hier n'est pas encore clôturé.
+        val yesterday = DayPoolAccount(today - 1, penalties = 30 * SKR, totalStake = 1_500 * SKR, winnersCount = 3)
+        val pending = state(500 * SKR).copy(
+            profile = profile(500 * SKR, pendingDays = listOf(today - 1, -1), pendingStakes = listOf(500 * SKR, 0)),
+            pools = mapOf(today - 1 to yesterday, today to todayPool),
+            now = today * DAY_SECONDS + 3 * 3600,
+        )
+        show(screen(pending))
+        compose.onNodeWithText("+10\u00A0SKR en attente").assertExists()
+        compose.onNodeWithText("Versé à", substring = true).assertExists()
+        compose.onAllNodesWithText("jusqu’à", substring = true).assertCountEquals(0)
     }
 
     @Test fun without_the_demo_the_pool_shows_no_invented_count() {

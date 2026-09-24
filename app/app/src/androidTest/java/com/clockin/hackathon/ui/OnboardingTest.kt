@@ -94,8 +94,8 @@ class OnboardingTest {
     /** Un état de chaîne avec une mise déjà prise de [staked], minimum à 500 SKR. */
     private fun stakedState(staked: Long) = ChainState(
         config = ConfigAccount(ByteArray(32), ByteArray(32), ByteArray(32), ByteArray(32),
-            poolBalance = 0, minStake = 500 * SKR, rewardCap = 0, faucetAmount = 0,
-            withdrawalDelaySeconds = 0, rewardRateBps = 0, decayBps = 2_500,
+            minStake = 500 * SKR, faucetAmount = 0, withdrawalDelaySeconds = 0,
+            poolCloseDelaySeconds = 21_600, decayBps = 2_500,
             maxDecayDays = 4, faucetEnabled = true),
         profile = ProfileAccount(ByteArray(32), staked = staked, settledDay = NOON / 86_400,
             lastCheckInDay = NOON / 86_400, exitRequestedAt = 0, exitUnlockAt = 0,

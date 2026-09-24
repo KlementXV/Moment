@@ -117,6 +117,7 @@ internal fun Profile(
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Stake(state, now, wallet, busy, exiting, withdrawable, onExit, onCancel, onFaucet, onStake)
             Pool(state, demoFeed)
+            PendingGain(state)
         }
         if (error != null) ErrorCard(error)
         when {
@@ -282,6 +283,17 @@ private fun Pool(state: ChainState, demo: Boolean) {
         mineLabel = if (state.posted) tr(Message.YourShareToday) else tr(Message.YourShareIfYouPost),
         mine = state.myShareToday,
     )
+}
+
+/** Part des pools pas encore clôturés : elle arrive dans le solde au versement. */
+@Composable
+private fun PendingGain(state: ChainState) {
+    val at = state.payoutAt ?: return
+    if (state.pendingGain <= 0) return
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(tr(Message.PendingGain, skr(state.pendingGain), NB), style = LabelLg, color = Success)
+        Text(tr(Message.PaidAt, clockTime(at)), style = LabelLg, color = Muted)
+    }
 }
 
 // ── Favoris et activité ────────────────────────────────────────────────────
@@ -484,6 +496,8 @@ private fun RulesContent(state: ChainState, now: Long) {
     val hours = (config?.withdrawalDelaySeconds ?: DEFAULT_WITHDRAWAL_SECONDS) / 3600
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         RulesDiagram(decay)
+        Rule(tr(Message.EachPublishedMomentSharesTheDayPool,
+            clockTime((state.day + 1) * DAY_SECONDS + (config?.poolCloseDelaySeconds ?: 21_600))))
         Rule(tr(Message.EachDayWithoutAMomentCostsOf, decay, NB, nextMomentAt(now)))
         Rule(tr(Message.AfterAWithdrawalRequestYourStakeBecomes, hours, NB))
         Text(
@@ -592,7 +606,7 @@ private fun ProfileDialog(title: String, onDismiss: () -> Unit, content: @Compos
 
 /**
  * Le schéma des règles : la mise part vers le jour, et le jour tombe
- * alternativement du bon côté (Moment publié, récompense) et du mauvais
+ * alternativement du bon côté (Moment publié, part du pool) et du mauvais
  * (jour manqué, pénalité). Une boucle de six secondes, trois pour chaque issue.
  */
 @Composable

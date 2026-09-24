@@ -564,8 +564,8 @@ internal fun StakeCard(
 /**
  * `.mo-pool` : la réserve du jour.
  *
- * [total] et [mine] viennent de la chaîne — le solde de la pool et ce qu'un
- * Moment publié rapporte, plafond compris. [counts] n'a pas de source : il est
+ * [total] et [mine] viennent de la chaîne — les pénalités du pool du jour et
+ * la part au prorata de la mise, versée le lendemain. [counts] n'a pas de source : il est
  * étiqueté comme tel, pour qu'on ne le lise pas comme un chiffre de la chaîne.
  */
 @Composable

@@ -22,6 +22,10 @@ internal fun nextMomentAt(now: Long, zone: ZoneId = ZoneId.systemDefault()): Str
     return tr(Message.At, day, next.format(DateTimeFormatter.ofPattern("HH:mm", AppLanguage.locale)))
 }
 
+/** Heure locale `HH:mm` d'un instant epoch (secondes). */
+internal fun clockTime(epochSeconds: Long, zone: ZoneId = ZoneId.systemDefault()): String =
+    Instant.ofEpochSecond(epochSeconds).atZone(zone).format(DateTimeFormatter.ofPattern("HH:mm", AppLanguage.locale))
+
 internal fun publicationDeadline(now: Long, zone: ZoneId = ZoneId.systemDefault()): String {
     val remaining = secondsUntilNextMoment(now)
     if (remaining > 3 * 3600) return tr(Message.Until, nextMomentAt(now, zone))
