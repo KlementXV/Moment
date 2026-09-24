@@ -1,5 +1,8 @@
 # Déploiement devnet — 2026-09-16
 
+> **Obsolète depuis le pool journalier (2026-09-24).** `Config` et `Profile` ont
+> changé de taille : ce déploiement doit être réinitialisé. Procédure en fin de page.
+
 Déploiement de référence. Toutes ces adresses sont publiques et vérifiables.
 
 | Rôle | Adresse |
@@ -72,3 +75,41 @@ d'abord le manifeste (signature détachée), puis la transaction `check_in`.
 
 Vérifier ensuite le compte `CheckIn` du jour : son `commitment` doit être le
 SHA-256 du manifeste signé (voir `docs/manifest-v1.md`).
+
+## Réinitialisation pour le pool journalier (2026-09-24)
+
+Les comptes existants ont l'ancienne disposition (`Config` 184 octets, `Profile`
+95) : le nouveau programme ne peut pas les relire. On repart d'un program id neuf.
+
+```sh
+cd program
+solana-keygen new -o target/deploy/clockin-keypair.json --force
+anchor keys sync
+anchor build --arch v0 && cargo test
+PUBLICATION_AUTHORITY=<clé publique> ./scripts/deploy-devnet.sh
+```
+
+Puis reporter le nouveau program id dans `app/local.properties`
+(`clockin.programId`), dans `PROGRAM_ID` du keyserver et dans ce document.
+
+Le bootstrap écrit désormais `pool_close_delay_seconds = 21600` et
+`decay_bps = 1000`, et verse l'amorçage au pool du jour UTC courant. Il ne sert
+qu'aux publieurs de ce jour-là.
+
+### Crank du keyserver
+
+`CRANK_KEYPAIR` pointe vers un fichier de clé Solana (tableau JSON de 64 octets),
+**distinct** de `PUBLICATION_AUTHORITY_KEYPAIR`, approvisionné en SOL : il paie
+les frais de `reap` et la rente des `DayPool` qu'il crée. Sans cette variable, le
+crank est désactivé (log `Crank reap désactivé`).
+
+### Vérification de bout en bout
+
+Aucun test automatique ne couvre le crank contre une vraie chaîne : un validateur
+local ne sait pas avancer d'un jour. À dérouler après la réinitialisation :
+
+1. Jour D : deux wallets misent et publient, un troisième mise et ne publie pas.
+2. Après 00:05 UTC (D+1) : les logs du keyserver montrent `crank reap sent=…`
+   (règlement de l'absent) ; le `DayPool` de D porte sa pénalité.
+3. Après 06:05 UTC (D+1) : nouvelle passe, les deux publieurs voient leur part
+   créditée dans le profil de l'app ; « en attente » disparaît.

@@ -12,6 +12,10 @@
  *   4. ce script                                   (initialize_config + seed_pool)
  *   5. spl-token authorize <MINT> mint <CONFIG_PDA>
  *
+ * `seed_pool` verse l'amorçage au pool du jour UTC courant : il est partagé par
+ * ceux qui publient ce jour-là, après la clôture (D+1 06:00 UTC). Si personne ne
+ * publie ce jour-là, il reste dans le vault, non attribué (spec pool journalier).
+ *
  * L'étape 5 est ce qui ferme la porte : après elle, plus personne ne peut créer
  * de SKR sauf le programme lui-même, par son faucet. L'ordre compte — l'admin
  * doit pouvoir mint avant de céder cette autorité, sinon il n'a rien à déposer.
@@ -84,14 +88,13 @@ const [adminTokenAccount] = PublicKey.findProgramAddressSync(
   ASSOCIATED_TOKEN_PROGRAM,
 );
 
-/** Paramètres de travail de la feuille de route (§6 de la spec). */
+/** Paramètres de travail (spec pool journalier). */
 const params = Buffer.concat([
   u64(500n * SKR), // min_stake
-  u64(1n * SKR), // reward_cap
   u64(1000n * SKR), // faucet_amount
   i64(172_800n), // withdrawal_delay_seconds : 48 h
-  u16(100), // reward_rate_bps : 1 %/jour
-  u16(2500), // decay_bps : 25 % par jour manqué
+  i64(21_600n), // pool_close_delay_seconds : pool de D clôturé à D+1 06:00 UTC
+  u16(1000), // decay_bps : 10 % par jour manqué
   Buffer.from([30]), // max_decay_days
   Buffer.from([1]), // faucet_enabled
 ]);
@@ -110,17 +113,26 @@ const initializeConfig = new TransactionInstruction({
   data: Buffer.concat([discriminator("initialize_config"), params]),
 });
 
+// Jour UTC vérifié par le programme : un envoi à cheval sur minuit échoue, relancer.
+const today = BigInt(Math.floor(Date.now() / 1000 / 86_400));
+const [dayPool] = PublicKey.findProgramAddressSync(
+  [Buffer.from("day_pool"), i64(today)],
+  programId,
+);
+
 const seedPool = new TransactionInstruction({
   programId,
   keys: [
     { pubkey: admin.publicKey, isSigner: true, isWritable: true },
-    { pubkey: config, isSigner: false, isWritable: true },
+    { pubkey: config, isSigner: false, isWritable: false },
+    { pubkey: dayPool, isSigner: false, isWritable: true },
     { pubkey: mint, isSigner: false, isWritable: false },
     { pubkey: adminTokenAccount, isSigner: false, isWritable: true },
     { pubkey: vault, isSigner: false, isWritable: true },
     { pubkey: TOKEN_PROGRAM, isSigner: false, isWritable: false },
+    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
   ],
-  data: Buffer.concat([discriminator("seed_pool"), u64(seedAmount)]),
+  data: Buffer.concat([discriminator("seed_pool"), i64(today), u64(seedAmount)]),
 });
 
 const connection = new Connection(rpcUrl, "confirmed");

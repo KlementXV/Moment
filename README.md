@@ -6,7 +6,7 @@ Application Android native pour la communauté Seeker, basée sur le [plan produ
 
 - Interface Kotlin / Compose : graphite, ivoire, menthe et lavande. Avant publication, **Home** montre un aperçu illustré flouté avec **Capturer mon Moment** au premier plan et une barre **Home + Capturer**. Après confirmation du check-in, retour sur Home déverrouillé et disparition de la barre jusqu’au prochain jour UTC. Un brouillon ne déverrouille pas Home.
 - Le profil s’ouvre par l’avatar en haut à droite ; il contient la série, le wallet et les règles. Il n’a pas de barre basse : flèche et retour Android ramènent à Home.
-- Échéances affichées dans le fuseau du téléphone, avec compte à rebours pendant les trois dernières heures. La fenêtre de publication du protocole reste calée sur minuit UTC. Les conditions de récompense SKR sont regroupées dans **Profil → Comment ça marche**.
+- Échéances affichées dans le fuseau du téléphone, avec compte à rebours pendant les trois dernières heures. La fenêtre de publication du protocole reste calée sur minuit UTC. Les règles du pool journalier sont regroupées dans **Profil → Comment ça marche**.
 - **L'économie vit on-chain.** L'app lit `Config`, `Profile` et le `CheckIn` du jour par RPC devnet : solde, série, total, demande de sortie et compte à rebours viennent des comptes Solana. L'ancienne simulation Kotlin est supprimée.
 - Le solde affiché est celui **après le decay déjà dû** — ce que l'utilisateur a réellement, pas la valeur périmée stockée dans le compte. Le programme appliquera exactement le même calcul.
 - Transactions construites et envoyées par l'app : `create_profile`, `faucet`, `stake`, `check_in`, `request_exit`, `cancel_exit`, `finalize_exit`. Signature par le wallet via Mobile Wallet Adapter ; aucune clé privée d'utilisateur ne transite par l'app.
@@ -102,21 +102,28 @@ Le script détecte le Seeker, compile l’APK debug, l’installe en conservant 
 
 Programme Anchor `clockin` : `7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1`.
 
-Comptes : `Config` (PDA singleton, paramètres et pool), `Profile` (PDA par wallet),
-`CheckIn` (PDA par couple wallet × jour, portant le commitment et la référence du
-blob). Tout le SKR vit dans un vault SPL unique ; le decay et les récompenses sont
-de la comptabilité, seuls `stake`, `seed_pool`, `faucet` et `finalize_exit` déplacent
-réellement des tokens.
+Comptes : `Config` (PDA singleton, paramètres), `Profile` (PDA par wallet, avec ses
+créances sur les pools), `DayPool` (PDA par jour : mises des publieurs et pénalités
+des absents), `CheckIn` (PDA par couple wallet × jour, portant le commitment et la
+référence du blob). Tout le SKR vit dans un vault SPL unique ; le decay et les parts
+sont de la comptabilité, seuls `stake`, `seed_pool`, `faucet` et `finalize_exit`
+déplacent réellement des tokens.
+
+**Pool journalier** : qui ne publie pas le jour D perd 10 % de sa mise. Ces pénalités
+forment le pool de D, partagé entre les publieurs de D au prorata de leur mise et
+réclamable après sa clôture (D+1 06:00 UTC). Le keyserver lance `reap` à 00:05 et à
+06:05 UTC pour régler les absents et verser les parts. Voir
+`docs/superpowers/specs/2026-09-24-pool-journalier-design.md`.
 
 Instructions : `initialize_config`, `update_config`, `set_publication_authority`,
 `seed_pool`, `create_profile`, `faucet`, `stake`, `check_in`, `reap`, `request_exit`,
 `cancel_exit`, `finalize_exit`.
 
 `check_in` exige une **co-signature de l'autorité de publication** : un client modifié
-ne peut ni publier ni toucher de récompense sans le contrôle serveur.
+ne peut ni publier ni prendre part au pool sans le contrôle serveur.
 
-Paramètres en vigueur : staking minimum 500 SKR, rendement 1 %/jour plafonné à 1 SKR,
-decay 25 % par jour manqué borné à 30 jours, sortie à 48 h, faucet 1000 SKR.
+Paramètres en vigueur : staking minimum 500 SKR, pénalité 10 % par jour manqué bornée
+à 30 jours, clôture du pool à D+1 06:00 UTC, sortie à 48 h, faucet 1000 SKR.
 
 ```sh
 cd program
