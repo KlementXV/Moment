@@ -59,6 +59,68 @@ pub fn settle_bound(exit_unlock_at: i64, today: i64) -> i64 {
     }
 }
 
+/// Destination d'une pénalité réglée.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dest {
+    /// Le pool du jour pénalisé, encore ouvert et doté de publieurs.
+    Day(i64),
+    /// Le pool du jour courant.
+    Today,
+}
+
+/// Part d'un publieur : prorata de sa mise, arrondi à l'inférieur. La poussière
+/// reste dans le vault, non attribuée. Bornée par `penalties` : une mise
+/// incohérente ne peut jamais faire payer plus que le pool.
+pub fn share(penalties: u64, stake: u64, total_stake: u64) -> u64 {
+    if total_stake == 0 {
+        return 0;
+    }
+    let raw = penalties as u128 * stake as u128 / total_stake as u128;
+    raw.min(penalties as u128) as u64
+}
+
+/// Clôture du pool de `day` : après elle, on réclame ; avant, on y verse.
+pub fn pool_closes_at(day: i64, delay: i64) -> i64 {
+    day.saturating_add(1)
+        .saturating_mul(DAY_SECONDS)
+        .saturating_add(delay)
+}
+
+/// Où verser la pénalité du jour `penalty_day`. Le total des mises d'un jour
+/// passé est définitif : on ne publie pour D que pendant D.
+pub fn route_penalty(
+    penalty_day: i64,
+    today: i64,
+    now: i64,
+    delay: i64,
+    total_stake_of_day: u64,
+) -> Dest {
+    let open = penalty_day < today && now < pool_closes_at(penalty_day, delay);
+    if open && total_stake_of_day > 0 {
+        Dest::Day(penalty_day)
+    } else {
+        Dest::Today
+    }
+}
+
+/// Sépare la perte du dernier jour manqué de celle des jours précédents :
+/// seul le dernier peut encore avoir un pool ouvert.
+/// `lost_older + lost_last_day == decay(...).lost`.
+pub fn split_decay(staked: u64, missed_days: i64, decay_bps: u16, max_decay_days: u8) -> (u64, u64) {
+    if missed_days <= 0 {
+        return (0, 0);
+    }
+    let before_last = decay(staked, missed_days - 1, decay_bps, max_decay_days).remaining;
+    let after = decay(staked, missed_days, decay_bps, max_decay_days).remaining;
+    (staked - before_last, before_last - after)
+}
+
+/// La clôture doit tomber avant la fin du lendemain : c'est ce qui borne à deux
+/// le nombre de créances ouvertes d'un profil.
+pub fn valid_close_delay(delay: i64) -> bool {
+    (0..DAY_SECONDS).contains(&delay)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,5 +211,92 @@ mod tests {
     #[test]
     fn empty_pool_pays_nothing() {
         assert_eq!(reward(100 * SKR, 100, 10 * SKR, 0), 0);
+    }
+
+    #[test]
+    fn share_is_pro_rata_of_the_stake() {
+        assert_eq!(share(10 * SKR, 100 * SKR, 200 * SKR), 5 * SKR);
+    }
+
+    #[test]
+    fn share_rounds_down_and_leaves_the_dust_in_the_vault() {
+        assert_eq!(share(10, 1, 3), 3);
+        let paid: u64 = (0..3).map(|_| share(10, 1, 3)).sum();
+        assert!(paid <= 10);
+        assert_eq!(share(1, 1, 3), 0);
+    }
+
+    #[test]
+    fn share_of_a_day_without_publishers_is_zero() {
+        assert_eq!(share(10 * SKR, 0, 0), 0);
+        assert_eq!(share(10 * SKR, 5 * SKR, 0), 0);
+    }
+
+    #[test]
+    fn share_never_exceeds_the_pool() {
+        // Mise incohérente (supérieure au total) : on ne paie jamais plus que le pool.
+        assert_eq!(share(10, 5, 3), 10);
+        assert_eq!(share(u64::MAX, u64::MAX, u64::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn a_pool_closes_the_next_morning() {
+        assert_eq!(pool_closes_at(100, 21_600), 101 * DAY_SECONDS + 21_600);
+        assert_eq!(pool_closes_at(100, 0), 101 * DAY_SECONDS);
+    }
+
+    #[test]
+    fn a_penalty_goes_to_its_own_day_while_the_pool_is_open() {
+        let closes = pool_closes_at(100, 21_600);
+        assert_eq!(route_penalty(100, 101, closes - 1, 21_600, 50), Dest::Day(100));
+    }
+
+    #[test]
+    fn a_penalty_settled_after_closure_goes_to_today() {
+        let closes = pool_closes_at(100, 21_600);
+        assert_eq!(route_penalty(100, 101, closes, 21_600, 50), Dest::Today);
+        assert_eq!(route_penalty(100, 102, closes + DAY_SECONDS, 21_600, 50), Dest::Today);
+    }
+
+    #[test]
+    fn a_penalty_of_a_day_without_publishers_goes_to_today() {
+        let closes = pool_closes_at(100, 21_600);
+        assert_eq!(route_penalty(100, 101, closes - 1, 21_600, 0), Dest::Today);
+    }
+
+    #[test]
+    fn today_is_never_a_penalty_destination_for_itself() {
+        assert_eq!(route_penalty(101, 101, 101 * DAY_SECONDS, 21_600, 50), Dest::Today);
+    }
+
+    #[test]
+    fn split_decay_isolates_the_last_missed_day() {
+        assert_eq!(split_decay(100 * SKR, 0, 1000, 30), (0, 0));
+        assert_eq!(split_decay(100 * SKR, 1, 1000, 30), (0, 10 * SKR));
+        // 100 → 90 → 81 : 10 SKR pour les jours anciens, 9 pour le dernier.
+        assert_eq!(split_decay(100 * SKR, 2, 1000, 30), (10 * SKR, 9 * SKR));
+    }
+
+    #[test]
+    fn split_decay_always_sums_to_the_decay() {
+        for missed in 0..40i64 {
+            for staked in [0u64, 1, 7, 12_345_678, u64::MAX / 2] {
+                let (older, last) = split_decay(staked, missed, 1000, 30);
+                assert_eq!(
+                    older + last,
+                    decay(staked, missed, 1000, 30).lost,
+                    "missed={missed} staked={staked}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_close_delay_must_stay_within_a_day() {
+        assert!(valid_close_delay(0));
+        assert!(valid_close_delay(21_600));
+        assert!(valid_close_delay(DAY_SECONDS - 1));
+        assert!(!valid_close_delay(DAY_SECONDS));
+        assert!(!valid_close_delay(-1));
     }
 }
