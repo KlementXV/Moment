@@ -25,6 +25,8 @@ class AccountsTest {
         .bool(active)
         .bool(true)                     // faucet_claimed
         .u8(254)                        // bump
+        .i64(-1L).i64(-1L)              // pending_days : emplacements libres
+        .u64(0L).u64(0L)                // pending_stakes
         .build()
 
     @Test
@@ -39,9 +41,18 @@ class AccountsTest {
     }
 
     @Test
-    fun a_profile_is_exactly_ninety_five_bytes() {
+    fun a_profile_is_exactly_127_bytes() {
         // 8 discriminant + 32 owner + 8 staked + 4 × 8 dates + 8 total + 4 streak + 3 octets
-        assertEquals(95, profileBytes().size)
+        // + 2 × 8 jours de créance + 2 × 8 mises de créance
+        assertEquals(127, profileBytes().size)
+    }
+
+    @Test
+    fun a_closed_gain_is_credited_before_the_decay() {
+        // Le programme encaisse d'abord : 40 + 10 SKR décimés une fois à 25 %.
+        val profile = ClockInAccounts.decodeProfile(profileBytes(staked = 40_000_000_000L, settledDay = 20_705L))
+        val displayed = profile.settledBalance(decayBps = 2500, maxDecayDays = 30, today = 20_707L, gain = 10_000_000_000L)
+        assertEquals(37_500_000_000L, displayed)
     }
 
     @Test(expected = IllegalArgumentException::class)

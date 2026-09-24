@@ -24,6 +24,8 @@ import com.clockin.hackathon.chain.ClockInAccounts
 import com.clockin.hackathon.chain.ClockInAddresses
 import com.clockin.hackathon.chain.ClockInInstructions
 import com.clockin.hackathon.chain.ConfigAccount
+import com.clockin.hackathon.chain.DailyPool
+import com.clockin.hackathon.chain.DayPoolAccount
 import com.clockin.hackathon.chain.ProfileAccount
 import com.clockin.hackathon.chain.SolanaRpc
 import com.clockin.hackathon.chain.TransactionBuilder
@@ -35,6 +37,7 @@ import com.clockin.hackathon.wallet.WalletException
 import com.clockin.hackathon.wallet.WalletFailure
 import com.clockin.hackathon.wallet.WalletSession
 import com.solana.publickey.SolanaPublicKey
+import com.solana.transaction.AccountMeta
 import com.solana.transaction.TransactionInstruction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -59,13 +62,17 @@ data class ChainState(
     val tokenBalance: Long = 0,
     val day: Long = 0,
     val loaded: Boolean = false,
+    /** Pools lus : créances, borne de règlement et aujourd'hui (`DailyPool.poolDays`). */
+    val pools: Map<Long, DayPoolAccount> = emptyMap(),
+    /** Instant de la lecture, en secondes epoch : décide quelles créances sont clôturées. */
+    val now: Long = 0,
 ) {
     /** Solde réel : celui du compte, après le decay déjà dû. */
     val balance: Long
         get() = if (profile == null || config == null) {
             0
         } else {
-            profile.settledBalance(config.decayBps, config.maxDecayDays, day)
+            profile.settledBalance(config.decayBps, config.maxDecayDays, day, closedGain)
         }
 
     /**
@@ -77,7 +84,7 @@ data class ChainState(
     val minStake: Long get() = config?.minStake ?: (500 * SKR)
 
     /** Pénalité d'un jour UTC manqué, en points de base, Config non lue comprise. */
-    val decayBps: Int get() = config?.decayBps ?: 2_500
+    val decayBps: Int get() = config?.decayBps ?: 1_000
     val streak: Long get() = profile?.streak ?: 0
     val totalCheckIns: Long get() = profile?.totalCheckIns ?: 0
     val active: Boolean get() = profile?.active == true
@@ -86,15 +93,37 @@ data class ChainState(
     val exitUnlockAt: Long get() = profile?.exitUnlockAt ?: 0
     val posted: Boolean get() = todayCheckIn != null
 
-    /**
-     * Ce qu'un Moment publié peut rapporter aujourd'hui : une part de la mise
-     * réglée, bornée par le plafond de la Config.
-     *
-     * C'est une promesse de la Config, pas un historique : la chaîne ne tient
-     * aucun journal des parts déjà reçues.
-     */
-    val dailyReward: Long
-        get() = config?.let { minOf(balance / 10_000 * it.rewardRateBps, it.rewardCap) } ?: 0
+    private val closeDelay: Long get() = config?.poolCloseDelaySeconds ?: 21_600
+
+    private fun claims(closed: Boolean): List<Pair<Long, Long>> = profile?.let { p ->
+        p.pendingDays.zip(p.pendingStakes).filter { (claimDay, _) ->
+            claimDay != DailyPool.NO_DAY && (now >= DailyPool.closesAt(claimDay, closeDelay)) == closed
+        }
+    } ?: emptyList()
+
+    private fun gain(claims: List<Pair<Long, Long>>): Long = claims.sumOf { (claimDay, stake) ->
+        pools[claimDay]?.let { DailyPool.share(it.penalties, stake, it.totalStake) } ?: 0
+    }
+
+    /** Parts clôturées : elles sont à l'utilisateur, la prochaine instruction les encaisse. */
+    val closedGain: Long get() = gain(claims(closed = true))
+
+    /** « +X SKR en attente » : parts des pools pas encore clôturés, estimées sur leur état actuel. */
+    val pendingGain: Long get() = gain(claims(closed = false))
+
+    /** Heure du prochain versement, en secondes epoch. */
+    val payoutAt: Long? get() = claims(closed = false).minOfOrNull { (claimDay, _) -> DailyPool.closesAt(claimDay, closeDelay) }
+
+    /** Pénalités et amorçage entrés aujourd'hui dans le pool du jour. */
+    val todayPoolTotal: Long get() = pools[day]?.penalties ?: 0
+
+    /** Part du pool d'aujourd'hui : acquise si l'on a publié, promise sinon. */
+    val myShareToday: Long get() {
+        val pool = pools[day] ?: return 0
+        val slot = profile?.pendingDays?.indexOf(day) ?: -1
+        return if (slot >= 0) DailyPool.share(pool.penalties, profile!!.pendingStakes[slot], pool.totalStake)
+        else DailyPool.share(pool.penalties, balance, pool.totalStake + balance)
+    }
 
     /** Le feed n'est lisible qu'après son propre check-in (§3). */
     val feedUnlocked: Boolean get() = posted
@@ -384,25 +413,38 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
             // A wallet that already holds SKR may never have used the faucet.
             if (!state.hasProfile) add(ClockInInstructions.createProfile(programId, owner))
             add(ClockInInstructions.createAssociatedTokenAccount(owner, owner, skrMint))
+            val day = utcDay()
+            val pools = state.profile?.takeIf { it.active }
+                ?.let { settlementPools(DailyPool.settleBound(it, day)) } ?: emptyList()
             add(ClockInInstructions.stake(
                 programId, owner, skrMint,
-                ClockInAddresses.associatedToken(owner, skrMint), amount
+                ClockInAddresses.associatedToken(owner, skrMint), day, amount, pools
             ))
         }
     }
 
-    fun requestExit() = submit { owner, _ -> listOf(ClockInInstructions.requestExit(programId, owner)) }
+    fun requestExit() = submit { owner, _ ->
+        val day = utcDay()
+        val bound = state.profile?.let { DailyPool.settleBound(it, day) } ?: (day - 1)
+        listOf(ClockInInstructions.requestExit(programId, owner, day, settlementPools(bound)))
+    }
 
     fun cancelExit() = submit { owner, _ -> listOf(ClockInInstructions.cancelExit(programId, owner)) }
 
     fun finalizeExit() = submit { owner, skrMint ->
+        // La finalisation règle jusqu'au dernier jour entier avant le déblocage.
+        val bound = Math.floorDiv(state.exitUnlockAt, 86_400L) - 1
         listOf(
             ClockInInstructions.finalizeExit(
                 programId, owner, owner, skrMint,
-                ClockInAddresses.associatedToken(owner, skrMint)
+                ClockInAddresses.associatedToken(owner, skrMint), utcDay(), settlementPools(bound)
             )
         )
     }
+
+    /** Pools de règlement exigés par le programme, calculés sur le dernier état lu. */
+    private fun settlementPools(bound: Long): List<AccountMeta> =
+        DailyPool.poolMetas(programId, state.profile, state.config, Instant.now().epochSecond, bound)
 
     /** Publication exclusively authorized by the backend; retries reuse the durable encrypted packet. */
     fun publish(reviewAcknowledged: Boolean = false, caption: String = "", onSuccess: () -> Unit) {
@@ -434,9 +476,11 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
                     }
                     val packet = requireNotNull(post)
                     val authority = SolanaPublicKey(requireNotNull(state.config).publicationAuthority)
+                    val bound = state.profile?.let { DailyPool.settleBound(it, day) } ?: (day - 1)
                     val instruction = ClockInInstructions.checkIn(programId, owner, authority, day,
                         packet.commitment.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
-                        packet.blobRef.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
+                        packet.blobRef.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
+                        settlementPools(bound))
                     val transaction = TransactionBuilder.build(listOf(instruction), owner, rpc.latestBlockhash())
                     // Wallet first: it may re-sort the accounts, so the server cosigns
                     // the exact message the wallet returned.
@@ -521,6 +565,10 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
             ?.let(ClockInAccounts::decodeProfile)
         val checkIn = rpc.accountData(ClockInAddresses.checkIn(programId, owner, day), programId)
             ?.let(ClockInAccounts::decodeCheckIn)
+        val pools = DailyPool.poolDays(profile, day).mapNotNull { poolDay ->
+            rpc.accountData(ClockInAddresses.dayPool(programId, poolDay), programId)
+                ?.let(ClockInAccounts::decodeDayPool)?.let { poolDay to it }
+        }.toMap()
         val balance = mint?.let { rpc.tokenBalance(ClockInAddresses.associatedToken(owner, it)) } ?: 0
         val saved = withContext(Dispatchers.IO) { pending.read(owner.base58(), day) }
         if (wallet?.address != owner) return
@@ -529,7 +577,8 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         hasPendingPublication = saved != null
         if (authWallet != owner.base58()) { remoteFeed = emptyList(); feedCursor = null }
         if (state.day != day || checkIn == null) { remoteFeed = emptyList(); feedCursor = null }
-        state = ChainState(config, profile, checkIn, balance, day, loaded = true)
+        state = ChainState(config, profile, checkIn, balance, day, loaded = true,
+            pools = pools, now = Instant.now().epochSecond)
     }
 
     private fun messageFor(failure: Throwable): String = run { android.util.Log.w("Moment", "Action echouee", failure) }.let { when (failure) {

@@ -75,7 +75,6 @@ private const val URGENT_SECONDS = 3 * 3600L
 private const val NB = " "
 
 /** Valeurs de repli quand la Config on-chain n'est pas encore lue. */
-private const val DEFAULT_REWARD_BPS = 100
 private const val DEFAULT_WITHDRAWAL_SECONDS = 172_800L
 private const val DEFAULT_FAUCET = 1000 * SKR
 
@@ -271,17 +270,17 @@ private fun Stake(
 /**
  * La pool du jour.
  *
- * Le total vient de la Config, et la part se déduit du taux et du plafond : ce
- * sont des chiffres de la chaîne. Le décompte gagnants / sans moment, lui,
+ * Le total vient du compte `DayPool` du jour, la part de sa mise au prorata :
+ * ce sont des chiffres de la chaîne. Le décompte gagnants / sans moment, lui,
  * n'est tenu nulle part — il n'apparaît qu'avec la démo, et porte sa pastille.
  */
 @Composable
 private fun Pool(state: ChainState, demo: Boolean) {
     PoolCard(
-        total = state.config?.poolBalance ?: 0,
+        total = state.todayPoolTotal,
         counts = if (demo) tr(Message.WinnersMissedMoments) else null,
         mineLabel = if (state.posted) tr(Message.YourShareToday) else tr(Message.YourShareIfYouPost),
-        mine = state.dailyReward,
+        mine = state.myShareToday,
     )
 }
 
@@ -482,12 +481,9 @@ private fun WalletActions(wallet: String, busy: Boolean, onDisconnect: () -> Uni
 private fun RulesContent(state: ChainState, now: Long) {
     val config = state.config
     val decay = percent(state.decayBps)
-    val reward = percent(config?.rewardRateBps ?: DEFAULT_REWARD_BPS)
-    val cap = config?.rewardCap ?: SKR
     val hours = (config?.withdrawalDelaySeconds ?: DEFAULT_WITHDRAWAL_SECONDS) / 3600
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        RulesDiagram(reward, decay)
-        Rule(tr(Message.EachConfirmedMomentCanEarnYouOf, reward, NB, skr(cap), NB))
+        RulesDiagram(decay)
         Rule(tr(Message.EachDayWithoutAMomentCostsOf, decay, NB, nextMomentAt(now)))
         Rule(tr(Message.AfterAWithdrawalRequestYourStakeBecomes, hours, NB))
         Text(
@@ -600,7 +596,7 @@ private fun ProfileDialog(title: String, onDismiss: () -> Unit, content: @Compos
  * (jour manqué, pénalité). Une boucle de six secondes, trois pour chaque issue.
  */
 @Composable
-private fun RulesDiagram(reward: String, decay: String) {
+private fun RulesDiagram(decay: String) {
     val transition = rememberInfiniteTransition(label = "rules")
     val phase by transition.animateFloat(0f, 2f,
         infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "phase")
@@ -624,7 +620,7 @@ private fun RulesDiagram(reward: String, decay: String) {
         }
         DiagramNode(
             if (posted) tr(Message.RulesStepPosted) else tr(Message.RulesStepMissed),
-            if (posted) "+$reward$NB%" else "−$decay$NB%", tone, arrived,
+            if (posted) "+SKR" else "−$decay$NB%", tone, arrived,
         )
     }
 }

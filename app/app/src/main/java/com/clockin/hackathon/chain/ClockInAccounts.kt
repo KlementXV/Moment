@@ -7,12 +7,11 @@ data class ConfigAccount(
     val publicationAuthority: ByteArray,
     val skrMint: ByteArray,
     val vault: ByteArray,
-    val poolBalance: Long,
     val minStake: Long,
-    val rewardCap: Long,
     val faucetAmount: Long,
     val withdrawalDelaySeconds: Long,
-    val rewardRateBps: Int,
+    /** Délai après la fin du jour D avant la clôture de son pool. */
+    val poolCloseDelaySeconds: Long,
     val decayBps: Int,
     val maxDecayDays: Int,
     val faucetEnabled: Boolean,
@@ -29,28 +28,35 @@ data class ProfileAccount(
     val streak: Long,
     val active: Boolean,
     val faucetClaimed: Boolean,
+    /** Créances sur les pools des jours publiés, `DailyPool.NO_DAY` = emplacement libre. */
+    val pendingDays: List<Long> = listOf(DailyPool.NO_DAY, DailyPool.NO_DAY),
+    val pendingStakes: List<Long> = listOf(0, 0),
 ) {
     /** Solde tel qu'il sera après le règlement des jours déjà manqués.
      * L'affichage doit montrer ce que l'utilisateur a réellement, pas le solde
      * périmé stocké dans le compte ; le programme appliquera exactement le même
-     * calcul à la prochaine instruction. */
-    fun settledBalance(decayBps: Int, maxDecayDays: Int, today: Long): Long {
+     * calcul à la prochaine instruction.
+     *
+     * `gain` : parts clôturées, que le programme encaisse avant de pénaliser. */
+    fun settledBalance(decayBps: Int, maxDecayDays: Int, today: Long, gain: Long = 0): Long {
         if (!active) return 0
-        val bound = if (exitUnlockAt > 0) {
-            minOf(today - 1, Math.floorDiv(exitUnlockAt, 86_400L) - 1)
-        } else {
-            today - 1
-        }
-        val missed = bound - settledDay
-        if (missed <= 0) return staked
+        val missed = DailyPool.settleBound(this, today) - settledDay
+        if (missed <= 0) return staked + gain
         if (missed > maxDecayDays) return 0
-        var remaining = staked.toBigInteger()
+        var remaining = (staked + gain).toBigInteger()
         val keep = (10_000 - decayBps).toBigInteger()
         val denominator = 10_000.toBigInteger()
         repeat(missed.toInt()) { remaining = remaining * keep / denominator }
         return remaining.toLong()
     }
 }
+
+data class DayPoolAccount(
+    val day: Long,
+    val penalties: Long,
+    val totalStake: Long,
+    val winnersCount: Long,
+)
 
 data class CheckInAccount(
     val owner: ByteArray,
@@ -72,12 +78,10 @@ object ClockInAccounts {
             publicationAuthority = reader.bytes(32),
             skrMint = reader.bytes(32),
             vault = reader.bytes(32),
-            poolBalance = reader.u64(),
             minStake = reader.u64(),
-            rewardCap = reader.u64(),
             faucetAmount = reader.u64(),
             withdrawalDelaySeconds = reader.i64(),
-            rewardRateBps = reader.u16(),
+            poolCloseDelaySeconds = reader.i64(),
             decayBps = reader.u16(),
             maxDecayDays = reader.u8(),
             faucetEnabled = reader.bool(),
@@ -97,6 +101,22 @@ object ClockInAccounts {
             streak = reader.u32(),
             active = reader.bool(),
             faucetClaimed = reader.bool(),
+        ).let { profile ->
+            reader.u8() // bump
+            profile.copy(
+                pendingDays = listOf(reader.i64(), reader.i64()),
+                pendingStakes = listOf(reader.u64(), reader.u64()),
+            )
+        }
+    }
+
+    fun decodeDayPool(data: ByteArray): DayPoolAccount {
+        val reader = readerFor(data, "DayPool")
+        return DayPoolAccount(
+            day = reader.i64(),
+            penalties = reader.u64(),
+            totalStake = reader.u64(),
+            winnersCount = reader.u32(),
         )
     }
 

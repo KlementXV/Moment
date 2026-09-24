@@ -65,19 +65,23 @@ object ClockInInstructions {
         owner: SolanaPublicKey,
         mint: SolanaPublicKey,
         ownerTokenAccount: SolanaPublicKey,
+        day: Long,
         amount: Long,
+        pools: List<AccountMeta> = emptyList(),
     ) = TransactionInstruction(
         programId,
         listOf(
             AccountMeta(owner, true, true),
-            AccountMeta(ClockInAddresses.config(programId), false, true),
+            AccountMeta(ClockInAddresses.config(programId), false, false),
             AccountMeta(ClockInAddresses.profile(programId, owner), false, true),
+            AccountMeta(ClockInAddresses.dayPool(programId, day), false, true),
             AccountMeta(mint, false, false),
             AccountMeta(ownerTokenAccount, false, true),
             AccountMeta(ClockInAddresses.vault(programId), false, true),
             AccountMeta(TOKEN_PROGRAM, false, false),
-        ),
-        BorshWriter().bytes(Anchor.instructionDiscriminator("stake")).u64(amount).build(),
+            AccountMeta(SYSTEM_PROGRAM, false, false),
+        ) + pools,
+        BorshWriter().bytes(Anchor.instructionDiscriminator("stake")).i64(day).u64(amount).build(),
     )
 
     fun checkIn(
@@ -111,21 +115,33 @@ object ClockInInstructions {
         )
     }
 
-    fun requestExit(programId: SolanaPublicKey, owner: SolanaPublicKey) =
-        exitRequest(programId, owner, "request_exit")
+    /** Le propriétaire paie le pool du jour s'il est à créer. */
+    fun requestExit(
+        programId: SolanaPublicKey,
+        owner: SolanaPublicKey,
+        day: Long,
+        pools: List<AccountMeta> = emptyList(),
+    ) = TransactionInstruction(
+        programId,
+        listOf(
+            AccountMeta(owner, true, true),
+            AccountMeta(ClockInAddresses.config(programId), false, false),
+            AccountMeta(ClockInAddresses.profile(programId, owner), false, true),
+            AccountMeta(ClockInAddresses.dayPool(programId, day), false, true),
+            AccountMeta(SYSTEM_PROGRAM, false, false),
+        ) + pools,
+        BorshWriter().bytes(Anchor.instructionDiscriminator("request_exit")).i64(day).build(),
+    )
 
     fun cancelExit(programId: SolanaPublicKey, owner: SolanaPublicKey) =
-        exitRequest(programId, owner, "cancel_exit")
-
-    private fun exitRequest(programId: SolanaPublicKey, owner: SolanaPublicKey, name: String) =
         TransactionInstruction(
             programId,
             listOf(
                 AccountMeta(owner, true, false),
-                AccountMeta(ClockInAddresses.config(programId), false, true),
+                AccountMeta(ClockInAddresses.config(programId), false, false),
                 AccountMeta(ClockInAddresses.profile(programId, owner), false, true),
             ),
-            Anchor.instructionDiscriminator(name),
+            Anchor.instructionDiscriminator("cancel_exit"),
         )
 
     fun finalizeExit(
@@ -134,18 +150,22 @@ object ClockInInstructions {
         owner: SolanaPublicKey,
         mint: SolanaPublicKey,
         ownerTokenAccount: SolanaPublicKey,
+        day: Long,
+        pools: List<AccountMeta> = emptyList(),
     ) = TransactionInstruction(
         programId,
         listOf(
             AccountMeta(caller, true, true),
             AccountMeta(owner, false, false),
-            AccountMeta(ClockInAddresses.config(programId), false, true),
+            AccountMeta(ClockInAddresses.config(programId), false, false),
             AccountMeta(ClockInAddresses.profile(programId, owner), false, true),
+            AccountMeta(ClockInAddresses.dayPool(programId, day), false, true),
             AccountMeta(mint, false, false),
             AccountMeta(ownerTokenAccount, false, true),
             AccountMeta(ClockInAddresses.vault(programId), false, true),
             AccountMeta(TOKEN_PROGRAM, false, false),
-        ),
-        Anchor.instructionDiscriminator("finalize_exit"),
+            AccountMeta(SYSTEM_PROGRAM, false, false),
+        ) + pools,
+        BorshWriter().bytes(Anchor.instructionDiscriminator("finalize_exit")).i64(day).build(),
     )
 }
