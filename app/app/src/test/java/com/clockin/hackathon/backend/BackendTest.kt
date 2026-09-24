@@ -34,11 +34,14 @@ class BackendTest {
         assertArrayEquals(unb64(fixture.string("front")), decoded.photos.front)
         val authority = Ed25519PrivateKeyParameters(ByteArray(32) { 8 }, 0).generatePublicKey().encoded
         fun hexBytes(value: String) = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        // Une créance clôturée de la veille : le contrat couvre aussi les pools de règlement.
+        val claim = com.solana.transaction.AccountMeta(ClockInAddresses.dayPool(SolanaPublicKey(program), post.day - 1), false, false)
         val tx = TransactionBuilder.build(listOf(ClockInInstructions.checkIn(SolanaPublicKey(program), SolanaPublicKey(wallet),
-            SolanaPublicKey(authority), post.day, hexBytes(post.commitment), hexBytes(post.blobRef))), SolanaPublicKey(wallet), Base58.encode(ByteArray(32) { 9 }))
+            SolanaPublicKey(authority), post.day, hexBytes(post.commitment), hexBytes(post.blobRef), listOf(claim))),
+            SolanaPublicKey(wallet), Base58.encode(ByteArray(32) { 9 }))
         java.io.File("build/android-transaction.txt").writeText(java.util.Base64.getEncoder().encodeToString(tx.serialize()))
         assertArrayEquals(unb64(fixture.string("transaction")), tx.serialize())
-        assertArrayEquals(byteArrayOf(2, 1, 3), tx.message.serialize().copyOfRange(0, 3))
+        assertArrayEquals(byteArrayOf(2, 1, 5), tx.message.serialize().copyOfRange(0, 3))
     }
     @Test fun encryptedPendingPostSurvivesRestartWithoutChangingReferences() {
         val original = packet()

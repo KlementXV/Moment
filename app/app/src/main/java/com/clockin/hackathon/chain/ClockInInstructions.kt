@@ -87,6 +87,8 @@ object ClockInInstructions {
         day: Long,
         commitment: ByteArray,
         blobRef: ByteArray,
+        /** Pools de règlement (créances clôturées, dernier jour manqué) : `DailyPool.poolMetas`. */
+        pools: List<AccountMeta> = emptyList(),
     ): TransactionInstruction {
         require(commitment.size == 32 && blobRef.size == 32)
         return TransactionInstruction(
@@ -94,11 +96,12 @@ object ClockInInstructions {
             listOf(
                 AccountMeta(owner, true, true),
                 AccountMeta(publicationAuthority, true, false),
-                AccountMeta(ClockInAddresses.config(programId), false, true),
+                AccountMeta(ClockInAddresses.config(programId), false, false),
                 AccountMeta(ClockInAddresses.profile(programId, owner), false, true),
+                AccountMeta(ClockInAddresses.dayPool(programId, day), false, true),
                 AccountMeta(ClockInAddresses.checkIn(programId, owner, day), false, true),
                 AccountMeta(SYSTEM_PROGRAM, false, false),
-            ),
+            ) + pools,
             BorshWriter()
                 .bytes(Anchor.instructionDiscriminator("check_in"))
                 .i64(day)

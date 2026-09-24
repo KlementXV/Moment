@@ -334,27 +334,25 @@ fn transaction(
     blockhash: Key,
 ) -> Vec<u8> {
     let p = Pubkey::new_from_array(program);
+    let pda = |seeds: &[&[u8]]| Pubkey::find_program_address(seeds, &p).0.to_bytes();
     let keys = [
         wallet,
         authority,
-        Pubkey::find_program_address(&[b"config"], &p).0.to_bytes(),
-        Pubkey::find_program_address(&[b"profile", &wallet], &p)
-            .0
-            .to_bytes(),
-        Pubkey::find_program_address(&[b"checkin", &wallet, &day.to_le_bytes()], &p)
-            .0
-            .to_bytes(),
+        pda(&[b"profile", &wallet]),
+        pda(&[b"day_pool", &day.to_le_bytes()]),
+        pda(&[b"checkin", &wallet, &day.to_le_bytes()]),
+        pda(&[b"config"]),
         [0; 32],
         program,
     ];
     let mut tx = vec![2];
     tx.extend_from_slice(&[0; 128]);
-    tx.extend_from_slice(&[2, 1, 2, 7]);
+    tx.extend_from_slice(&[2, 1, 3, 8]);
     for key in keys {
         tx.extend_from_slice(&key);
     }
     tx.extend_from_slice(&blockhash);
-    tx.extend_from_slice(&[1, 6, 6, 0, 1, 2, 3, 4, 5, 80]);
+    tx.extend_from_slice(&[1, 7, 7, 0, 1, 5, 2, 3, 4, 6, 80]);
     tx.extend_from_slice(&protocol::hash(b"global:check_in")[..8]);
     tx.extend_from_slice(&day.to_le_bytes());
     tx.extend_from_slice(&commitment);
@@ -598,7 +596,7 @@ async fn identical_retry_accepts_fresh_blockhash_but_second_post_conflicts() {
         .await;
     assert_eq!(first["transaction"], second["transaction"]);
     let mut raw = protocol::unbase64(input["transaction"].as_str().unwrap(), 1232).unwrap();
-    raw[357..389].fill(2);
+    raw[389..421].fill(2); // blockhash, after 8 keys
     input["transaction"] = json!(protocol::b64(&raw));
     let (status, fresh) = h.request("POST", "/v1/posts", Some(&token), input).await;
     assert_eq!(status, StatusCode::OK);

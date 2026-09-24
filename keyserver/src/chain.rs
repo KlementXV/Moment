@@ -137,6 +137,9 @@ pub struct Expected {
     pub day: i64,
     pub commitment: Key,
     pub blob_ref: Key,
+    /// Days whose `DayPool` may ride along as a settlement account (claims and
+    /// the last missed day). Today's pool is a named account, never an extra.
+    pub pools: Vec<i64>,
 }
 
 /// ComputeBudget111111111111111111111111111111
@@ -165,7 +168,7 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
     let message_offset = r.position();
     let [signers, readonly_signed, readonly_unsigned] = r.array::<3>()?;
     let count = r.short()?;
-    if signers != 2 || readonly_signed != 1 || !(7..=8).contains(&count) {
+    if signers != 2 || readonly_signed != 1 || !(8..=12).contains(&count) {
         return Err(invalid());
     }
     let mut keys = Vec::with_capacity(count);
@@ -198,6 +201,13 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
         &[b"checkin", &expected.wallet, &expected.day.to_le_bytes()],
     )
     .0;
+    let day_pool = pda(&expected.program, &[b"day_pool", &expected.day.to_le_bytes()]).0;
+    let allowed: Vec<Key> = expected
+        .pools
+        .iter()
+        .filter(|day| **day < expected.day)
+        .map(|day| pda(&expected.program, &[b"day_pool", &day.to_le_bytes()]).0)
+        .collect();
     let mut used = vec![false; count];
     used[0] = true;
     used[1] = true;
@@ -211,7 +221,8 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
         used[program_index] = true;
         if program == expected.program {
             check_ins += 1;
-            if r.short()? != 6 {
+            let accounts = r.short()?;
+            if !(7..=10).contains(&accounts) {
                 return Err(invalid());
             }
             let expected_accounts = [
@@ -219,6 +230,7 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
                 expected.authority,
                 config,
                 profile,
+                day_pool,
                 checkin,
                 [0; 32],
             ];
@@ -228,12 +240,24 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
                     || match position {
                         0 => index != 0,
                         1 => index != 1,
-                        2..=4 => !writable_unsigned(index),
+                        3..=5 => !writable_unsigned(index),
+                        // config (no longer written by the program) and system_program
                         _ => !readonly_nonsigner(index),
                     }
                 {
                     return Err(invalid());
                 }
+                used[index] = true;
+            }
+            // Settlement pools: only the allowed days, each at most once.
+            let mut extras: Vec<Key> = Vec::new();
+            for _ in 7..accounts {
+                let index = r.u8()? as usize;
+                let key = *keys.get(index).ok_or_else(invalid)?;
+                if index < 2 || !allowed.contains(&key) || extras.contains(&key) {
+                    return Err(invalid());
+                }
+                extras.push(key);
                 used[index] = true;
             }
             if r.short()? != 80
@@ -579,29 +603,65 @@ mod tests {
             day: 20_000,
             commitment: [4; 32],
             blob_ref: [5; 32],
+            pools: vec![],
         };
-        let keys = [
+        (check_in_raw(&e, None), e, owner, authority)
+    }
+    /// Canonical `check_in`: writable PDAs first, then config and system read-only.
+    /// `extra` is appended as a read-only account right before the program.
+    fn check_in_raw(e: &Expected, extra: Option<Key>) -> Vec<u8> {
+        let mut keys = vec![
             e.wallet,
             e.authority,
-            pda(&e.program, &[b"config"]).0,
             pda(&e.program, &[b"profile", &e.wallet]).0,
+            pda(&e.program, &[b"day_pool", &e.day.to_le_bytes()]).0,
             pda(&e.program, &[b"checkin", &e.wallet, &e.day.to_le_bytes()]).0,
+            pda(&e.program, &[b"config"]).0,
             [0; 32],
-            e.program,
         ];
+        keys.extend(extra);
+        keys.push(e.program);
+        let count = keys.len() as u8;
         let mut raw = vec![2];
         raw.extend_from_slice(&[0; 128]);
-        raw.extend_from_slice(&[2, 1, 2, 7]);
-        for key in keys {
-            raw.extend_from_slice(&key);
+        raw.extend_from_slice(&[2, 1, count - 5, count]);
+        for key in &keys {
+            raw.extend_from_slice(key);
         }
         raw.extend_from_slice(&[6; 32]);
-        raw.extend_from_slice(&[1, 6, 6, 0, 1, 2, 3, 4, 5, 80]);
+        let mut accounts = vec![0, 1, 5, 2, 3, 4, 6];
+        if extra.is_some() {
+            accounts.push(7);
+        }
+        raw.extend_from_slice(&[1, count - 1, accounts.len() as u8]);
+        raw.extend_from_slice(&accounts);
+        raw.push(80);
         raw.extend_from_slice(&discriminator("global:check_in"));
         raw.extend_from_slice(&e.day.to_le_bytes());
         raw.extend_from_slice(&e.commitment);
         raw.extend_from_slice(&e.blob_ref);
-        (raw, e, owner, authority)
+        raw
+    }
+    #[test]
+    fn accepts_allowed_pools_and_refuses_the_rest() {
+        let (_, mut e, _, _) = fixture();
+        e.pools = vec![e.day - 1];
+        let allowed = pda(&e.program, &[b"day_pool", &(e.day - 1).to_le_bytes()]).0;
+        assert!(validate_transaction(&check_in_raw(&e, Some(allowed)), &e).is_ok());
+        assert!(validate_transaction(&check_in_raw(&e, Some([42; 32])), &e).is_err());
+    }
+    #[test]
+    fn refuses_extra_accounts_that_are_not_allowed_pools() {
+        let (_, e, _, _) = fixture();
+        let pool = pda(&e.program, &[b"day_pool", &(e.day - 1).to_le_bytes()]).0;
+        assert!(validate_transaction(&check_in_raw(&e, Some(pool)), &e).is_err());
+    }
+    #[test]
+    fn refuses_todays_pool_as_an_extra_account() {
+        let (_, mut e, _, _) = fixture();
+        e.pools = vec![e.day];
+        let today = pda(&e.program, &[b"day_pool", &e.day.to_le_bytes()]).0;
+        assert!(validate_transaction(&check_in_raw(&e, Some(today)), &e).is_err());
     }
     #[test]
     fn cosigning_preserves_wallet_signature_and_message() {
@@ -631,8 +691,8 @@ mod tests {
         noncanonical.extend_from_slice(&raw[1..]);
         assert!(validate_transaction(&noncanonical, &e).is_err());
         for offset in [
-            1, 65, 129, 130, 131, 132, 133, 165, 389, 390, 391, 392, 393, 394, 395, 396, 397, 398,
-            399, 400, 410, 450,
+            1, 65, 129, 130, 131, 132, 133, 165, 421, 422, 423, 424, 425, 426, 427, 428, 429, 430,
+            431, 432, 442, 482,
         ] {
             let mut tampered = raw.clone();
             tampered[offset] ^= 1;
@@ -649,6 +709,7 @@ mod tests {
             e.authority,
             pda(&e.program, &[b"profile", &e.wallet]).0,
             pda(&e.program, &[b"checkin", &e.wallet, &e.day.to_le_bytes()]).0,
+            pda(&e.program, &[b"day_pool", &e.day.to_le_bytes()]).0,
             pda(&e.program, &[b"config"]).0,
             COMPUTE_BUDGET,
             e.program,
@@ -656,17 +717,17 @@ mod tests {
         ];
         let mut raw = vec![2];
         raw.extend_from_slice(&[0; 128]);
-        raw.extend_from_slice(&[2, 1, 3, 8]);
+        raw.extend_from_slice(&[2, 1, 4, 9]);
         for key in keys {
             raw.extend_from_slice(&key);
         }
         raw.extend_from_slice(&[6; 32]);
         raw.push(3);
-        raw.extend_from_slice(&[5, 0, 5, 2]);
+        raw.extend_from_slice(&[6, 0, 5, 2]);
         raw.extend_from_slice(&200_000u32.to_le_bytes());
-        raw.extend_from_slice(&[5, 0, 9, 3]);
+        raw.extend_from_slice(&[6, 0, 9, 3]);
         raw.extend_from_slice(&price.to_le_bytes());
-        raw.extend_from_slice(&[6, 6, 0, 1, 4, 2, 3, 7, 80]);
+        raw.extend_from_slice(&[7, 7, 0, 1, 5, 2, 4, 3, 8, 80]);
         raw.extend_from_slice(&discriminator("global:check_in"));
         raw.extend_from_slice(&e.day.to_le_bytes());
         raw.extend_from_slice(&e.commitment);
@@ -683,9 +744,9 @@ mod tests {
         assert_eq!(&signed[..65], &raw[..65]);
         protocol::verify(&e.authority, &signed[129..], &signed[65..129]).unwrap();
         assert!(validate_transaction(&wallet_shaped(&e, MAX_MICRO_LAMPORTS + 1), &e).is_err());
-        let mut writable_system = wallet_shaped(&e, 100_000);
-        writable_system[131] = 2; // system program would become writable
-        assert!(validate_transaction(&writable_system, &e).is_err());
+        let mut writable_config = wallet_shaped(&e, 100_000);
+        writable_config[131] = 3; // config would become writable
+        assert!(validate_transaction(&writable_config, &e).is_err());
     }
     fn layout(name: &str) -> Vec<u8> {
         let text = include_str!("../tests/fixtures/account-layouts-v2.hex");

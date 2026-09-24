@@ -20,6 +20,9 @@ object ClockInAddresses {
     fun checkIn(programId: SolanaPublicKey, owner: SolanaPublicKey, day: Long): SolanaPublicKey =
         find(programId, listOf("checkin".toByteArray(), owner.bytes, BorshWriter().i64(day).build()))
 
+    fun dayPool(programId: SolanaPublicKey, day: Long): SolanaPublicKey =
+        find(programId, listOf("day_pool".toByteArray(), BorshWriter().i64(day).build()))
+
     /** Compte de tokens associé : PDA du programme ATA sur
      * `[propriétaire, programme de tokens, mint]`. */
     fun associatedToken(owner: SolanaPublicKey, mint: SolanaPublicKey): SolanaPublicKey =

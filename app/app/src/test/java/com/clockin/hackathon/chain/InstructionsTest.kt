@@ -1,8 +1,10 @@
 package com.clockin.hackathon.chain
 
 import com.solana.publickey.SolanaPublicKey
+import com.solana.transaction.AccountMeta
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -68,6 +70,22 @@ class InstructionsTest {
         assertArrayEquals(byteArrayOf(-30, 80, 0, 0, 0, 0, 0, 0), instruction.data.copyOfRange(8, 16))
         assertArrayEquals(commitment, instruction.data.copyOfRange(16, 48))
         assertArrayEquals(blobRef, instruction.data.copyOfRange(48, 80))
+    }
+
+    @Test
+    fun check_in_carries_the_day_pool_and_the_settlement_pools() {
+        val extra = AccountMeta(ClockInAddresses.dayPool(programId, 99), false, false)
+        val instruction = ClockInInstructions.checkIn(
+            programId = programId, owner = owner, publicationAuthority = authority,
+            day = 100L, commitment = ByteArray(32), blobRef = ByteArray(32), pools = listOf(extra)
+        )
+        assertEquals(8, instruction.accounts.size)
+        assertEquals(ClockInAddresses.config(programId), instruction.accounts[2].publicKey)
+        assertFalse("la config n'est plus écrite", instruction.accounts[2].isWritable)
+        assertEquals(ClockInAddresses.dayPool(programId, 100), instruction.accounts[4].publicKey)
+        assertTrue(instruction.accounts[4].isWritable)
+        assertEquals(ClockInAddresses.checkIn(programId, owner, 100), instruction.accounts[5].publicKey)
+        assertEquals(extra, instruction.accounts[7])
     }
 
     @Test

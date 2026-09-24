@@ -368,23 +368,31 @@ async fn submit(
         ));
     }
     let transaction = protocol::unbase64(&input.transaction, 1232)?;
+    // The chain is read first: the allowed settlement pools depend on the profile.
+    let (config, profile) = tokio::try_join!(app.chain.config(), app.chain.profile(wallet))?;
+    let authority = app.authority.verifying_key().to_bytes();
+    if config.authority != authority {
+        return Err(Error::unavailable());
+    }
+    // Every claim and the settle bound are allowed, not only those the client must
+    // carry: a claim closing between build and validation must not fail the post.
+    let mut pools: Vec<i64> = profile
+        .iter()
+        .flat_map(|p| p.pending_days)
+        .filter(|day| *day >= 0)
+        .collect();
+    pools.extend(profile.iter().map(|p| p.settle_bound(input.day)));
     let expected = Expected {
         program: app.program,
         wallet,
-        authority: app.authority.verifying_key().to_bytes(),
+        authority,
         day: input.day,
         commitment,
         blob_ref,
+        pools,
     };
     let blockhash = chain::validate_transaction(&transaction, &expected)?;
-    let (config, profile, valid) = tokio::try_join!(
-        app.chain.config(),
-        app.chain.profile(wallet),
-        app.chain.blockhash_valid(blockhash)
-    )?;
-    if config.authority != expected.authority {
-        return Err(Error::unavailable());
-    }
+    let valid = app.chain.blockhash_valid(blockhash).await?;
     let profile = profile
         .filter(|p| p.owner == wallet)
         .ok_or_else(Error::forbidden)?;

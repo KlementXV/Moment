@@ -45,6 +45,8 @@ fn validate_and_cosign_android_transaction() {
         day: fixture["day"].as_i64().unwrap(),
         commitment: protocol::hash_hex(field("commitment")).unwrap(),
         blob_ref: protocol::hash_hex(field("blobRef")).unwrap(),
+        // The Android fixture carries yesterday's closed claim.
+        pools: vec![fixture["day"].as_i64().unwrap() - 1],
     };
     let raw = protocol::unbase64(field("transaction"), 1232).unwrap();
     assert_eq!(
