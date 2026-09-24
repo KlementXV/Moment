@@ -70,7 +70,7 @@ class ProfileScreenTest {
             favorites = favorites, onToggleFavorite = onToggleFavorite,
             onRetrySkr = {}, onNicknameChange = {}, onConnect = {}, onDisconnect = {},
             onFaucet = {}, onStake = onStake, onExit = {}, onCancel = {}, onWithdraw = {},
-            demoFeed = demoFeed, onDemoFeedChange = {})
+            demoFeed = demoFeed)
     }
 
     private fun show(content: @Composable () -> Unit) {
@@ -97,7 +97,7 @@ class ProfileScreenTest {
         // seulement afficher un chiffre plus petit.
         show(screen(state(100 * SKR)))
         compose.onNodeWithText("Sous le minimum").assertExists()
-        compose.onNodeWithText("Il te faut 500 SKR misés pour publier. Complète ta mise.",
+        compose.onNodeWithText("Il te faut 500\u00A0SKR en staking pour publier. Complète ton staking.",
             substring = true).assertExists()
     }
 
@@ -123,16 +123,14 @@ class ProfileScreenTest {
     @Test fun without_the_demo_the_pool_shows_no_invented_count() {
         show(screen(state(500 * SKR), demoFeed = false))
         compose.onNodeWithText("5 gagnants · 5 sans moment").assertDoesNotExist()
-        // Seul le titre de la section démo porte ce mot : la pool n'a pas de
-        // pastille puisqu'elle n'affiche aucun chiffre inventé.
-        compose.onAllNodesWithText("Démo").assertCountEquals(1)
+        // La pool n'a pas de pastille puisqu'elle n'affiche aucun chiffre inventé.
+        compose.onAllNodesWithText("Démo").assertCountEquals(0)
     }
 
     @Test fun the_invented_pool_count_appears_only_with_the_demo_and_carries_its_badge() {
         show(screen(state(500 * SKR), demoFeed = true))
         compose.onNodeWithText("5 gagnants · 5 sans moment").assertExists()
-        // La pastille de la pool s'ajoute au titre de la section.
-        compose.onAllNodesWithText("Démo").assertCountEquals(2)
+        compose.onAllNodesWithText("Démo").assertCountEquals(1)
     }
 
     @Test fun the_sections_without_a_source_explain_themselves() {
@@ -146,10 +144,11 @@ class ProfileScreenTest {
     @Test fun any_amount_can_be_typed_rather_than_only_the_presets() {
         var staked: Long? = null
         show(screen(state(500 * SKR), onStake = { staked = it }))
+        compose.onNodeWithText("Ajouter des SKR").performScrollTo().performClick()
         val field = compose.onNodeWithContentDescription("Montant en SKR")
         field.performScrollTo().performTextClearance()
         field.performTextInput("137,5")
-        compose.onNodeWithText("Miser 137,50 SKR").performScrollTo().performClick()
+        compose.onNodeWithText("Staker 137,50\u00A0SKR").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(137 * SKR + SKR / 2, staked) }
     }
 
@@ -158,10 +157,11 @@ class ProfileScreenTest {
         // Le solde du wallet est de 1 284 SKR : taper plus ne doit pas mener à
         // une signature qui échouera.
         show(screen(state(500 * SKR), onStake = { staked = it }))
+        compose.onNodeWithText("Ajouter des SKR").performScrollTo().performClick()
         val field = compose.onNodeWithContentDescription("Montant en SKR")
         field.performScrollTo().performTextClearance()
         field.performTextInput("99999")
-        compose.onNodeWithText("Miser 1284 SKR").performScrollTo().performClick()
+        compose.onNodeWithText("Staker 1284\u00A0SKR").performScrollTo().performClick()
         compose.runOnIdle { assertEquals(1_284 * SKR, staked) }
     }
 
@@ -170,8 +170,19 @@ class ProfileScreenTest {
         // chose, et non en tête de page où elle doublait la carte de mise.
         show(screen(state(500 * SKR)))
         compose.onNodeWithText("Solde").assertDoesNotExist()
-        compose.onNodeWithText("1284 SKR disponibles sur ton wallet.",
+        compose.onNodeWithText("Ajouter des SKR").performScrollTo().performClick()
+        compose.onNodeWithText("1284\u00A0SKR disponibles sur ton wallet.",
             substring = true).performScrollTo().assertExists()
+    }
+
+    @Test fun the_rules_and_the_language_open_in_popups() {
+        show(screen(state(500 * SKR)))
+        compose.onNodeWithText("Comment ça marche").assertDoesNotExist()
+        compose.onNodeWithText("Règles du jeu").performScrollTo().performClick()
+        compose.onNodeWithText("Comment ça marche").assertExists()
+        compose.onNodeWithText("Fermer").performClick()
+        compose.onNodeWithText("Changer la langue").performScrollTo().performClick()
+        compose.onNodeWithText("Langue").assertExists()
     }
 
     @Test fun a_favourite_can_be_removed_from_the_profile() {

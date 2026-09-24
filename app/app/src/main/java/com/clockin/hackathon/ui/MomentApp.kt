@@ -31,6 +31,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -144,6 +147,20 @@ private fun MomentContent(model: ClockInModel) {
     var skrFailed by remember(wallet) { mutableStateOf(false) }
     var skrRetry by remember(wallet) { mutableIntStateOf(0) }
     val resolver = remember { com.clockin.hackathon.chain.SkrResolver(com.clockin.hackathon.BuildConfig.IDENTITY_RPC_URL) }
+    // Noms .skr des auteurs du feed ; null = aucun nom (on garde l'adresse).
+    val authorNames = remember { androidx.compose.runtime.mutableStateMapOf<String, String?>() }
+    LaunchedEffect(model.remoteFeed) {
+        for (author in model.remoteFeed.map { it.wallet }.distinct()) {
+            if (author in authorNames) continue
+            try {
+                authorNames[author] = resolver.resolve(author)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Réessayé au prochain rafraîchissement du feed.
+            }
+        }
+    }
     LaunchedEffect(wallet, skrRetry) {
         if (wallet != null) {
             skrLoading = true
@@ -162,10 +179,8 @@ private fun MomentContent(model: ClockInModel) {
     // Préférence d'affichage, pas d'état de chaîne : elle vaut pour l'appareil,
     // pas pour le wallet, et survit à une déconnexion.
     val demoPrefs = remember(context) { context.getSharedPreferences("demo", android.content.Context.MODE_PRIVATE) }
-    var demoFeed by remember { mutableStateOf(demoPrefs.getBoolean("fakeFeed", false)) }
-    val setDemoFeed: (Boolean) -> Unit = { value ->
-        demoPrefs.edit().putBoolean("fakeFeed", value).apply(); demoFeed = value
-    }
+    // L'interrupteur a quitté le profil : la démo ne s'active plus que par la préférence.
+    val demoFeed = remember { demoPrefs.getBoolean("fakeFeed", false) }
     // Les favoris sont lus ici, pas dans le fil : le profil les retire, le fil
     // les affiche, et deux copies indépendantes de la même préférence
     // divergeraient dès le premier retrait.
@@ -176,13 +191,19 @@ private fun MomentContent(model: ClockInModel) {
             .also { favoritePrefs.edit().putStringSet("names", it).apply() }
     }
     val onboarding = remember(context) { context.getSharedPreferences("onboarding", android.content.Context.MODE_PRIVATE) }
-    var completed by remember(wallet) { mutableStateOf(wallet != null && onboarding.getBoolean(wallet, false)) }
+    // Un wallet déjà connecté au lancement (session restaurée) a forcément vu
+    // les écrans d'explication : on ne les rejoue pas. Seule la mise, si elle
+    // manque, est redemandée (voir `resumeAtStake`).
+    val restoredWallet = remember { wallet }
+    var completed by remember(wallet) {
+        mutableStateOf(wallet != null && (wallet == restoredWallet || onboarding.getBoolean(wallet, false)))
+    }
     // Le parcours ne s'achève pas sur une préférence locale mais sur une mise
     // réellement en jeu : sans elle `canPublish` restera faux, et le fil se
     // refermerait sur un wallet connecté sans aucune sortie. Tant que la chaîne
     // n'a pas répondu, on ne conclut rien — sinon l'écran clignoterait.
     val staked = !state.loaded || state.active
-    val entered = wallet != null && completed && staked
+    val entered = wallet != null && completed && staked && model.signedInWallet == wallet
     // Les écrans d'explication ont déjà été vus : le parcours reprend droit à
     // la seule étape qui manque.
     val resumeAtStake = wallet != null && completed && state.loaded && !state.active
@@ -218,7 +239,9 @@ private fun MomentContent(model: ClockInModel) {
         )) {
         Column(Modifier.fillMaxSize().background(Ink)) {
         Surface(color = Ink, modifier = Modifier.weight(1f).fillMaxWidth()) {
-            if (!entered) {
+            if (wallet != null && completed && model.signedInWallet != wallet) {
+                SignIn(wallet, model.busy, model.error, onSignIn = model::signIn, onChangeWallet = model::disconnect)
+            } else if (!entered) {
                 Onboarding(wallet, state, now, model.busy, model.error,
                     resumeAtStake = resumeAtStake,
                     onConnect = model::connect, onStake = model::stake,
@@ -244,9 +267,7 @@ private fun MomentContent(model: ClockInModel) {
                 // l'écran et la barre flotte par-dessus. Ce que le Scaffold réserve pour
                 // elle redescend plus bas, dans le contenu du défilement.
                 Scaffold(containerColor = Ink,
-                    contentWindowInsets = WindowInsets.safeDrawing,
-                    bottomBar = { DailyNavigation(page, posted,
-                        onHome = { page = MomentPage.Home }, onCapture = { captureOpen = true }) }) { padding ->
+                    contentWindowInsets = WindowInsets.safeDrawing) { padding ->
                     val direction = LocalLayoutDirection.current
                     Column(Modifier.fillMaxSize().padding(
                         start = padding.calculateStartPadding(direction),
@@ -275,67 +296,85 @@ private fun MomentContent(model: ClockInModel) {
                         // La hauteur de la barre devient une marge du contenu, pas du
                         // conteneur : le dernier élément reste atteignable, et tout ce
                         // qui défile passe dessous.
-                        BoxWithConstraints(Modifier.fillMaxSize()) {
-                            // Le verrou ne défile pas : il prend toute la hauteur libre,
-                            // se centre dedans, et son décor flouté passe sous le verre de
-                            // la barre. Ce qui défile, lui, garde la marge qui laisse le
-                            // dernier élément atteignable au-dessus de la barre.
-                            val locked = currentPage == MomentPage.Home && !unlocked
-                            val minimumHeight = if (locked) maxHeight
-                                else (maxHeight - 42.dp - padding.calculateBottomPadding()).coerceAtLeast(0.dp)
-                            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState(),
-                                enabled = !locked)
-                                // Le fil respire à 16 dp comme la maquette ; le profil,
-                                // qui est du texte en colonne, garde sa gouttière large.
-                                .padding(horizontal = if (currentPage == MomentPage.Home) 16.dp else 26.dp)
-                                .padding(top = if (locked) 0.dp else 8.dp,
-                                    bottom = if (locked) 0.dp else 24.dp + padding.calculateBottomPadding())
-                                .heightIn(min = minimumHeight),
-                                verticalArrangement = if (currentPage == MomentPage.Home && !unlocked) Arrangement.Center
-                                    else Arrangement.spacedBy(24.dp)) {
-                                when (currentPage) {
-                                    MomentPage.Home -> Column {
-                                        if (model.hasPendingPublication) {
-                                            Text(tr(Message.ResumePendingExplanation), style = BodySm, color = Muted)
-                                            TextButton(enabled = !model.busy && !model.feedLoading,
-                                                onClick = { model.publish { captureOpen = false } }) {
-                                                Text(tr(Message.ResumePending))
+                        // Tirer le fil vers le bas le relit : la chaîne d'abord, puis
+                        // les moments. Hors du fil ouvert, il n'y a rien à rafraîchir.
+                        val pull = rememberPullToRefreshState()
+                        Box(Modifier.fillMaxSize().pullToRefresh(
+                            isRefreshing = model.feedLoading, state = pull,
+                            enabled = currentPage == MomentPage.Home && unlocked,
+                            onRefresh = { model.refresh(); model.loadFeed(interactive = true) },
+                        )) {
+                            BoxWithConstraints(Modifier.fillMaxSize()) {
+                                // Le verrou ne défile pas : il prend toute la hauteur libre,
+                                // se centre dedans, et son décor flouté passe sous le verre de
+                                // la barre. Ce qui défile, lui, garde la marge qui laisse le
+                                // dernier élément atteignable au-dessus de la barre.
+                                val locked = currentPage == MomentPage.Home && !unlocked
+                                val minimumHeight = if (locked) maxHeight
+                                    else (maxHeight - 42.dp - padding.calculateBottomPadding()).coerceAtLeast(0.dp)
+                                Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState(),
+                                    enabled = !locked)
+                                    // Le fil respire à 16 dp comme la maquette ; le profil,
+                                    // qui est du texte en colonne, garde sa gouttière large.
+                                    .padding(horizontal = if (currentPage == MomentPage.Home) 16.dp else 26.dp)
+                                    .padding(top = if (locked) 0.dp else 8.dp,
+                                        bottom = if (locked) 0.dp else 24.dp + padding.calculateBottomPadding())
+                                    .heightIn(min = minimumHeight),
+                                    verticalArrangement = if (currentPage == MomentPage.Home && !unlocked) Arrangement.Center
+                                        else Arrangement.spacedBy(24.dp)) {
+                                    when (currentPage) {
+                                        MomentPage.Home -> Column {
+                                            if (model.hasPendingPublication) {
+                                                Text(tr(Message.ResumePendingExplanation), style = BodySm, color = Muted)
+                                                TextButton(enabled = !model.busy && !model.feedLoading,
+                                                    onClick = { model.publish { captureOpen = false } }) {
+                                                    Text(tr(Message.ResumePending))
+                                                }
                                             }
+                                            Feed(state, now, unlocked, demo = demoFeed,
+                                            remote = model.remoteFeed,
+                                            loading = model.feedLoading,
+                                            hasMore = model.feedCursor != null,
+                                            onRefresh = { model.loadFeed(interactive = true) },
+                                            onMore = { model.loadFeed(more = true, interactive = true) },
+                                            needsSignature = model.feedNeedsSignature,
+                                            feedError = model.feedError,
+                                            onLike = model::toggleLike,
+                                            authorName = { author ->
+                                                if (author == wallet) nickname.ifBlank { skrName.orEmpty() }.ifBlank { null }
+                                                else authorNames[author]
+                                            },
+                                            photos = model.draft,
+                                            caption = model.caption,
+                                            favorites = favorites,
+                                            onToggleFavorite = toggleFavorite,
+                                            minimumHeight = minimumHeight,
+                                            onCapture = { captureOpen = true },
+                                            onProfile = { page = MomentPage.Profile })
                                         }
-                                        Feed(state, now, unlocked, demo = demoFeed,
-                                        remote = model.remoteFeed,
-                                        loading = model.feedLoading,
-                                        hasMore = model.feedCursor != null,
-                                        onRefresh = { model.loadFeed() },
-                                        onMore = { model.loadFeed(more = true) },
-                                        photos = model.draft,
-                                        caption = model.caption,
-                                        favorites = favorites,
-                                        onToggleFavorite = toggleFavorite,
-                                        minimumHeight = minimumHeight,
-                                        onCapture = { captureOpen = true },
-                                        onProfile = { page = MomentPage.Profile })
+                                        MomentPage.Profile -> Profile(state, now, wallet, model.busy, model.error,
+                                            nickname = nickname,
+                                            skrName = skrName,
+                                            skrLoading = skrLoading,
+                                            skrFailed = skrFailed,
+                                            favorites = favorites,
+                                            onToggleFavorite = toggleFavorite,
+                                            onRetrySkr = { skrRetry++ },
+                                            onNicknameChange = saveNickname,
+                                            onConnect = model::connect,
+                                            onDisconnect = model::disconnect,
+                                            onFaucet = model::claimFaucet,
+                                            onStake = model::stake,
+                                            onExit = { confirmExit = true },
+                                            onCancel = model::cancelExit,
+                                            onWithdraw = model::finalizeExit,
+                                            demoFeed = demoFeed)
                                     }
-                                    MomentPage.Profile -> Profile(state, now, wallet, model.busy, model.error,
-                                        nickname = nickname,
-                                        skrName = skrName,
-                                        skrLoading = skrLoading,
-                                        skrFailed = skrFailed,
-                                        favorites = favorites,
-                                        onToggleFavorite = toggleFavorite,
-                                        onRetrySkr = { skrRetry++ },
-                                        onNicknameChange = saveNickname,
-                                        onConnect = model::connect,
-                                        onDisconnect = model::disconnect,
-                                        onFaucet = model::claimFaucet,
-                                        onStake = model::stake,
-                                        onExit = { confirmExit = true },
-                                        onCancel = model::cancelExit,
-                                        onWithdraw = model::finalizeExit,
-                                        demoFeed = demoFeed,
-                                        onDemoFeedChange = setDemoFeed)
                                 }
                             }
+                            PullToRefreshDefaults.Indicator(pull, model.feedLoading,
+                                Modifier.align(Alignment.TopCenter),
+                                containerColor = PanelRaised, color = Accent)
                         }
                     }
                     }

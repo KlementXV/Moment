@@ -112,13 +112,13 @@ Mint de test devnet, **9 décimales**. `1 SKR = 1_000_000_000` unités.
 
 | Paramètre | Valeur de travail | Source |
 |---|---|---|
-| `min_stake` | 10 SKR | §15.2 à calibrer |
+| `min_stake` | 500 SKR | §15.2 à calibrer |
 | `reward_rate_bps` | 100 (1 %/jour) | §6.1 |
 | `reward_cap` | 1 SKR | §6.1 anti-baleine |
 | `decay_bps` | 2500 (25 %) | §15.2, variante 5000 à simuler |
 | `max_decay_days` | 30 | §6.1 |
 | `withdrawal_delay_seconds` | 172 800 (48 h) | §6.3, **figé en v1** |
-| `faucet_amount` | 100 SKR | D7 |
+| `faucet_amount` | 1000 SKR | D7 |
 
 Ces valeurs vivent dans `Config` et se changent par `update_config` sans redéploiement.
 

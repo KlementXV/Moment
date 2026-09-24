@@ -71,9 +71,8 @@ data class ChainState(
     /**
      * La mise plancher du produit, tant que la Config on-chain n'est pas lue.
      *
-     * Attention : le déploiement devnet actuel écrit 10 SKR, et la chaîne fait
-     * foi dès qu'elle répond. Cette valeur n'est vue qu'avant la première
-     * lecture — les aligner demande de réécrire la Config.
+     * La chaîne fait foi dès qu'elle répond : cette valeur n'est vue qu'avant la
+     * première lecture. `program/scripts/bootstrap-devnet.ts` écrit la même.
      */
     val minStake: Long get() = config?.minStake ?: (500 * SKR)
 
@@ -123,14 +122,32 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         private set
     private var feedJob: kotlinx.coroutines.Job? = null
     private var sessionGeneration = 0L
-    private var authToken: String? = null
-    private var authWallet: String? = null
-    private var authExpires = 0L
+    /**
+     * La session keyserver survit au redémarrage de l'app : sans elle, chaque
+     * lancement rouvrirait le wallet pour signer avant même d'afficher le fil.
+     */
+    private val sessionStore = application.getSharedPreferences("backend-session", android.content.Context.MODE_PRIVATE)
+    private var authToken: String? = sessionStore.getString("token", null)
+    private var authWallet: String? = sessionStore.getString("wallet", null)
+    private var authExpires = sessionStore.getLong("expires", 0L)
+    /** Le wallet dont la session keyserver est valide : c'est lui qui est « connecté ». */
+    var signedInWallet by mutableStateOf(authWallet?.takeIf { authToken != null && Instant.now().epochSecond + 30 < authExpires })
+        private set
+    private fun clearBackendSession() {
+        authToken = null; authWallet = null; authExpires = 0; signedInWallet = null
+        sessionStore.edit().clear().apply()
+    }
+    private fun hasBackendSession(owner: SolanaPublicKey) =
+        authToken != null && authWallet == owner.base58() && Instant.now().epochSecond + 30 < authExpires
     var remoteFeed by mutableStateOf<List<RemoteMoment>>(emptyList())
         private set
     var feedCursor by mutableStateOf<String?>(null)
         private set
     var feedLoading by mutableStateOf(false)
+        private set
+    var feedNeedsSignature by mutableStateOf(false)
+        private set
+    var feedError by mutableStateOf<String?>(null)
         private set
 
     private suspend fun authenticate(session: WalletSession, owner: SolanaPublicKey): String {
@@ -144,14 +161,46 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         val result = backend.verify(owner.base58(), challenge.string("nonce"), signature)
         check(session.address == owner && generation == sessionGeneration)
         authWallet = owner.base58(); authExpires = result.string("expiresAt").toLong()
-        return result.string("token").also { authToken = it }
+        authToken = result.string("token")
+        signedInWallet = authWallet
+        sessionStore.edit().putString("token", authToken).putString("wallet", authWallet)
+            .putLong("expires", authExpires).apply()
+        return authToken!!
     }
 
-    fun loadFeed(more: Boolean = false) {
+    /** Optimistic like toggle; the server count wins once it answers. */
+    fun toggleLike(commitment: String) {
+        val session = wallet ?: return
+        val owner = session.address ?: return
+        val current = remoteFeed.firstOrNull { it.commitment == commitment } ?: return
+        val wanted = !current.liked
+        fun update(likes: Int, liked: Boolean) {
+            remoteFeed = remoteFeed.map { if (it.commitment == commitment) it.copy(likes = likes, liked = liked) else it }
+        }
+        update(current.likes + if (wanted) 1 else -1, wanted)
+        viewModelScope.launch {
+            try {
+                val (likes, liked) = backend.like(commitment, wanted, authenticate(session, owner))
+                update(likes, liked)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) { update(current.likes, current.liked); error = messageFor(failure) }
+        }
+    }
+
+    /**
+     * Le fil a besoin d'une session keyserver, qui se signe dans le wallet.
+     * Un chargement automatique ([interactive] faux) n'ouvre jamais le wallet :
+     * il signale seulement [feedNeedsSignature], et c'est un geste de
+     * l'utilisateur (bouton, tirer pour actualiser) qui lance la signature.
+     */
+    fun loadFeed(more: Boolean = false, interactive: Boolean = false) {
         val session = wallet ?: return
         val owner = session.address ?: return
         if (busy || feedLoading || !state.posted) return
+        if (!interactive && !hasBackendSession(owner)) { feedNeedsSignature = true; return }
         val generation = sessionGeneration
+        feedNeedsSignature = false
+        feedError = null
         feedLoading = true
         feedJob = viewModelScope.launch {
             try {
@@ -167,14 +216,23 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
                 val page = backend.feed(day, if (more) feedCursor else null, token)
                 val items = withContext(Dispatchers.IO) { page.items.map { item ->
                     val post = SealedPost(day, item.commitment, item.blobRef, unb64(item.postKey), backend.blob(item.blobRef, token))
-                    RemoteMoment(item.wallet, item.commitment, PostPacket.open(post, Base58.decode(item.wallet), BuildConfig.NETWORK, programId.bytes))
+                    val opened = PostPacket.open(post, Base58.decode(item.wallet), BuildConfig.NETWORK, programId.bytes)
+                    RemoteMoment(item.wallet, item.commitment, opened.photos, opened.caption, item.likes, item.liked)
                 } }
                 if (generation == sessionGeneration && wallet?.address == owner && day == utcDay()) {
                     remoteFeed = ((if (more) remoteFeed else emptyList()) + items).distinctBy { it.commitment }
                     feedCursor = page.next
                 }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (failure: Exception) { if (generation == sessionGeneration) { remoteFeed = emptyList(); feedCursor = null; error = messageFor(failure) } }
+            catch (failure: Exception) {
+                if (generation == sessionGeneration) {
+                    // Une signature refusée ou interrompue ne coupe rien : le fil
+                    // déjà chargé reste, et l'erreur s'affiche dans le fil, sans
+                    // dialogue qui bloquerait la navigation.
+                    if (failure !is WalletException) { remoteFeed = emptyList(); feedCursor = null }
+                    feedError = messageFor(failure)
+                }
+            }
             finally { if (generation == sessionGeneration) feedLoading = false }
         }
     }
@@ -236,13 +294,44 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         error = null
         viewModelScope.launch {
             try {
-                session.connect()
-                    .onSuccess { refreshNow(it) }
-                    .onFailure { error = messageFor(it) }
+                val owner = session.connect().getOrElse { error = messageFor(it); return@launch }
+                // Être connecté, c'est avoir signé la session keyserver : une
+                // signature refusée laisse déconnecté, pas à moitié connecté.
+                try { authenticate(session, owner) }
+                catch (failure: Exception) {
+                    if (failure is kotlinx.coroutines.CancellationException) throw failure
+                    session.forget(); error = messageFor(failure); return@launch
+                }
+                refreshNow(owner)
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
                 error = tr(Message.CouldnTReadTheBlockchainCheckYour)
+            } finally {
+                busy = false
+                if (state.posted) loadFeed()
+            }
+        }
+    }
+
+    /**
+     * Resigne la session keyserver d'un wallet déjà connu (session expirée ou
+     * révoquée). Tant qu'elle manque, l'app n'affiche que l'écran de connexion.
+     */
+    fun signIn() {
+        val session = wallet ?: return
+        val owner = session.address ?: return
+        if (busy || feedLoading) return
+        busy = true
+        error = null
+        viewModelScope.launch {
+            try {
+                authenticate(session, owner)
+                refreshNow(owner)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                error = messageFor(failure)
             } finally {
                 busy = false
                 if (state.posted) loadFeed()
@@ -259,7 +348,8 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         if (busy) return
         sessionGeneration++
         feedJob?.cancel(); feedLoading = false; hasPendingPublication = false
-        authToken = null; authWallet = null; authExpires = 0
+        clearBackendSession()
+        feedNeedsSignature = false; feedError = null
         remoteFeed = emptyList(); feedCursor = null
         wallet?.forget()
         state = ChainState()
@@ -290,12 +380,15 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun stake(amount: Long) = submit { owner, skrMint ->
-        listOf(
-            ClockInInstructions.stake(
+        buildList {
+            // A wallet that already holds SKR may never have used the faucet.
+            if (!state.hasProfile) add(ClockInInstructions.createProfile(programId, owner))
+            add(ClockInInstructions.createAssociatedTokenAccount(owner, owner, skrMint))
+            add(ClockInInstructions.stake(
                 programId, owner, skrMint,
                 ClockInAddresses.associatedToken(owner, skrMint), amount
-            )
-        )
+            ))
+        }
     }
 
     fun requestExit() = submit { owner, _ -> listOf(ClockInInstructions.requestExit(programId, owner)) }
@@ -335,7 +428,7 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
                         val manifest = PostManifest.of(BuildConfig.NETWORK, programId.bytes, owner.bytes, day, photos.rear, photos.front)
                         val signature = session.signManifest(manifest).getOrThrow()
                         post = withContext(Dispatchers.IO) {
-                            PostPacket.seal(manifest, signature, photos).also { pending.write(owner.base58(), it) }
+                            PostPacket.seal(manifest, signature, photos, caption.trim().take(DraftCodec.MAX_CAPTION_CHARS)).also { pending.write(owner.base58(), it) }
                         }
                         hasPendingPublication = true
                     }
@@ -345,7 +438,17 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
                         packet.commitment.chunked(2).map { it.toInt(16).toByte() }.toByteArray(),
                         packet.blobRef.chunked(2).map { it.toInt(16).toByte() }.toByteArray())
                     val transaction = TransactionBuilder.build(listOf(instruction), owner, rpc.latestBlockhash())
-                    val authorized = try { backend.authorize(packet, transaction.serialize(), token) }
+                    // Wallet first: it may re-sort the accounts, so the server cosigns
+                    // the exact message the wallet returned.
+                    val signed = session.signTransaction(transaction.serialize()).getOrThrow()
+                    val message = TransactionBuilder.messageBytes(signed)
+                    require(TransactionBuilder.sameMeaning(message, transaction.message.serialize()))
+                    val signers = TransactionBuilder.decode(message).signerKeys
+                    val ownerIndex = signers.indexOf(owner.bytes.toList())
+                    val authorityIndex = signers.indexOf(authority.bytes.toList())
+                    require(ownerIndex == 0 && authorityIndex == 1)
+                    verifySignature(owner.bytes, message, TransactionBuilder.signatureAt(signed, ownerIndex))
+                    val authorized = try { backend.authorize(packet, signed, token) }
                     catch (failure: BackendException) {
                         // These responses precede reservation. Only discard on the initial
                         // attempt: a previous transport failure may already have reserved it.
@@ -355,16 +458,10 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
                         }
                         throw failure
                     }
-                    val message = transaction.message.serialize()
                     require(TransactionBuilder.messageBytes(authorized).contentEquals(message))
-                    val authorityIndex = TransactionBuilder.signatureIndex(transaction, authority)
-                    val authoritySignature = TransactionBuilder.signatureAt(authorized, authorityIndex)
-                    verifySignature(authority.bytes, message, authoritySignature)
-                    val signed = session.signTransaction(authorized).getOrThrow()
-                    require(TransactionBuilder.messageBytes(signed).contentEquals(message))
-                    verifySignature(owner.bytes, message, TransactionBuilder.signatureAt(signed, TransactionBuilder.signatureIndex(transaction, owner)))
-                    val repaired = TransactionBuilder.withSignatureAt(signed, authorityIndex, authoritySignature)
-                    val signature = rpc.sendTransaction(repaired)
+                    require(TransactionBuilder.signatureAt(authorized, ownerIndex).contentEquals(TransactionBuilder.signatureAt(signed, ownerIndex)))
+                    verifySignature(authority.bytes, message, TransactionBuilder.signatureAt(authorized, authorityIndex))
+                    val signature = rpc.sendTransaction(authorized)
                     check(rpc.awaitConfirmation(signature)) { tr(Message.TransactionSentButNotConfirmedWithinThe) }
                     backend.confirm(packet.commitment, token)
                 }
@@ -406,8 +503,9 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         val blockhash = rpc.latestBlockhash()
         val transaction = TransactionBuilder.build(instructions, owner, blockhash)
         val signed = session.signTransaction(transaction.serialize()).getOrThrow()
-        require(TransactionBuilder.messageBytes(signed).contentEquals(transaction.message.serialize()))
-        verifySignature(owner.bytes, transaction.message.serialize(), TransactionBuilder.signatureAt(signed, 0))
+        val signedMessage = TransactionBuilder.messageBytes(signed)
+        require(TransactionBuilder.sameMeaning(signedMessage, transaction.message.serialize()))
+        verifySignature(owner.bytes, signedMessage, TransactionBuilder.signatureAt(signed, 0))
         val signature = rpc.sendTransaction(signed)
         check(rpc.awaitConfirmation(signature)) {
             tr(Message.TransactionSentButNotConfirmedWithinThe)
@@ -434,12 +532,12 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         state = ChainState(config, profile, checkIn, balance, day, loaded = true)
     }
 
-    private fun messageFor(failure: Throwable): String = when (failure) {
-        is BackendException -> { if (failure.status == 401) { authToken = null; authExpires = 0 }; failure.message.orEmpty() }
+    private fun messageFor(failure: Throwable): String = run { android.util.Log.w("Moment", "Action echouee", failure) }.let { when (failure) {
+        is BackendException -> { if (failure.status == 401) clearBackendSession(); failure.message.orEmpty() }
         is IllegalArgumentException -> "La configuration ou les données reçues sont invalides."
         is WalletException -> failure.failure.message
         else -> tr(Message.TransactionFailedCheckYourConnectionThenTry)
-    }
+    } }
 
     // --- brouillon local chiffré ---
 

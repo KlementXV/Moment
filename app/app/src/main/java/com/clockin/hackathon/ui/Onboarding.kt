@@ -18,6 +18,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.clockin.hackathon.R
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -244,7 +247,7 @@ internal fun Onboarding(
                 illustration = { BadgeTile(Icons.Outlined.AccountBalanceWallet, tr(Message.Wallet)) },
                 actions = {
                     PrimaryButton(
-                        if (busy) "Connexion…" else tr(Message.ConnectMyWallet),
+                        if (busy) tr(Message.Connecting) else tr(Message.ConnectMyWallet),
                         enabled = !busy, loading = busy, onClick = onConnect,
                     )
                     Text(tr(Message.NetworkFeesInSolAreShownBefore),
@@ -255,8 +258,8 @@ internal fun Onboarding(
 
             OnboardingStep.Start -> FirstMoment(state, now, onFinish = onFinish)
 
-            OnboardingStep.Stake -> StakeSheet(
-                state = state, now = now, busy = busy, error = error,
+            OnboardingStep.Stake -> StakeStep(
+                step = current, state = state, busy = busy, error = error,
                 onBack = ::back,
                 onStake = { staking = true; onStake(it) },
                 onContinue = { go(OnboardingStep.Permissions) },
@@ -378,12 +381,10 @@ private fun Splash(onStart: () -> Unit) {
     Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
         Spacer(Modifier.height(40.dp))
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Box(Modifier.size(112.dp).clip(RoundedCornerShape(25.dp)).background(GradientBrand)
-                .semantics { contentDescription = tr(Message.MomentLogo) }, contentAlignment = Alignment.Center) {
-                Canvas(Modifier.size(56.dp)) {
-                    drawCircle(OnBrand, size.minDimension * .34f, style = Stroke(size.minDimension * .11f))
-                }
-            }
+            // Le même dessin que l'écran de démarrage système : le logo ne
+            // saute pas quand l'app prend la main.
+            Image(painterResource(R.drawable.ic_splash_logo), contentDescription = tr(Message.MomentLogo),
+                modifier = Modifier.size(200.dp))
         }
         Column(Modifier.padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(tr(Message.OneMomentADay2), style = DisplayLg)
@@ -391,6 +392,34 @@ private fun Splash(onStart: () -> Unit) {
                 color = Muted, style = BodyLg)
         }
         Column(Modifier.padding(bottom = 24.dp)) { PrimaryButton(tr(Message.GetStarted), onClick = onStart) }
+    }
+}
+
+/**
+ * La session a expiré ou a été refusée : le wallet est connu, mais rien de
+ * l'app ne s'ouvre avant qu'il ait resigné. Même décor que l'accueil.
+ */
+@Composable
+internal fun SignIn(wallet: String, busy: Boolean, error: String?, onSignIn: () -> Unit, onChangeWallet: () -> Unit) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(40.dp))
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Image(painterResource(R.drawable.ic_splash_logo), contentDescription = tr(Message.MomentLogo),
+                modifier = Modifier.size(200.dp))
+        }
+        Column(Modifier.padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr(Message.SignInTitle), style = DisplayLg)
+            Text(tr(Message.SignInExplanation), color = Muted, style = BodyLg)
+            Text(wallet.take(6) + "…" + wallet.takeLast(4), color = Muted, style = BodyMd)
+            if (error != null) Text(error, color = Danger, style = BodyMd)
+        }
+        Column(Modifier.padding(bottom = 24.dp)) {
+            PrimaryButton(if (busy) tr(Message.Signing) else tr(Message.SignInWithMyWallet),
+                enabled = !busy, loading = busy, onClick = onSignIn)
+            TextButton(onClick = onChangeWallet, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Text(tr(Message.ChangeWallet), color = Muted)
+            }
+        }
     }
 }
 
@@ -603,15 +632,15 @@ private fun BadgeTile(icon: ImageVector, label: String) {
 }
 
 /**
- * La mise : le seul écran du parcours qui envoie une transaction.
+ * Le staking : le seul écran du parcours qui envoie une transaction.
  *
- * La maquette ne la met pas en page pleine mais en feuille, posée sur le fil
- * verrouillé — ce qu'on achète est visible derrière ce qu'on paie. Trois
- * états s'y succèdent : choix du montant, signature en cours, solde trop court.
+ * Plein écran comme les étapes qui le précèdent : le parcours garde une seule
+ * forme jusqu'au bout. Trois états s'y succèdent : choix du montant,
+ * signature en cours, solde trop court.
  */
 @Composable
-private fun StakeSheet(
-    state: ChainState, now: Long, busy: Boolean, error: String?,
+private fun StakeStep(
+    step: OnboardingStep, state: ChainState, busy: Boolean, error: String?,
     onBack: () -> Unit, onStake: (Long) -> Unit, onContinue: () -> Unit,
     onFaucet: () -> Unit, onDisconnect: () -> Unit,
 ) {
@@ -620,85 +649,62 @@ private fun StakeSheet(
     var amount by rememberSaveable(min) { mutableLongStateOf(min) }
     val enough = balance >= min
     val staked = state.active
-    // Un profil actif ne suffit pas : c'est la mise, decay déduit, qui doit
+    // Un profil actif ne suffit pas : c'est le staking, decay déduit, qui doit
     // couvrir le minimum — sinon le fil resterait fermé après l'écran.
     val covered = staked && state.balance >= min
-    // Mise déjà suffisante : le sélecteur ne s'ouvre que si on demande à ajouter.
+    // Staking déjà suffisant : le sélecteur ne s'ouvre que si on demande à ajouter.
     var adding by rememberSaveable { mutableStateOf(false) }
-    // Ajouter demande d'avoir de quoi : le solde en compte, pas celui déjà misé.
+    // Ajouter demande d'avoir de quoi : le solde en compte, pas celui déjà staké.
     val canAdd = amount in min..balance
     // Les préréglages ne montrent que ce qui est atteignable — sauf le minimum,
     // qui reste visible même hors de portée : c'est le seuil à connaître.
     val presets = listOf(min, min * 2, min * 5).filter { it <= balance || it == min }
+    val picking = !covered || adding
 
-    Box(Modifier.fillMaxSize()) {
-        // Le décor : ce que la mise ouvre. Inerte, et muet pour le lecteur d'écran.
-        Column(Modifier.fillMaxSize().clearAndSetSemantics {}) {
-            Spacer(Modifier.windowInsetsTopHeight(WindowInsets.safeDrawing))
-            FeedTopBar("", posted = false, onSearch = null, onProfile = {})
-            Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {
-                FeedGate(countdown(secondsUntilNextMoment(now)), atRisk = null, reward = null, onCapture = {}) {
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        demoMoments(Math.floorDiv(now, DAY_SECONDS)).take(2).forEach {
-                            MomentCard(it.name, it.subtitle, it.caption, self = false, variant = it.variant)
-                        }
-                    }
-                }
-            }
-            BottomBar(onHome = {}, onCapture = {})
-        }
-        MomentSheet(tr(Message.PutYourStakeInPlay), onClose = if (busy) null else onBack) {
-            if (staked) Text(tr(Message.AlreadyStakedSkr, skr(state.balance)),
-                Modifier.fillMaxWidth(), style = TitleMd, color = Success,
-                textAlign = TextAlign.Center)
-            if (covered) {
-                // Le minimum est déjà couvert : la feuille ne redemande rien et
-                // « Continuer » passe devant, sans sélecteur à traverser. En
-                // ajouter reste possible, replié derrière un second geste.
-                Text(tr(Message.YourStakeMeetsTheSkrMinimum, skr(min)),
-                    Modifier.fillMaxWidth(), style = BodyMd, color = Muted,
-                    textAlign = TextAlign.Center)
-                PrimaryButton(if (busy) tr(Message.Signing) else tr(Message.Continue),
-                    enabled = !busy, onClick = onContinue)
-                if (!adding) {
-                    TextButton(
-                        onClick = { adding = true }, enabled = !busy,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(tr(Message.AddToMyStake), color = Accent) }
-                } else {
-                    AmountPicker(
-                        value = amount, min = min, step = min, max = balance, presets = presets,
-                        supporting = if (enough) tr(Message.ADayWithoutAMomentCosts2, decayPercent(state))
-                            else tr(Message.YourBalanceIsSkr, skr(balance)),
-                        error = !enough,
-                        onChange = { amount = it },
-                    )
-                    error?.let { Text(it, style = BodyMd, color = Danger) }
-                    TextButton(
-                        onClick = { onStake(amount) }, enabled = !busy && canAdd,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(tr(Message.AddSkrToMyStake, skr(amount)), color = if (canAdd) Accent else Muted) }
-                }
-            } else {
-                AmountPicker(
+    StepScaffold(
+        step = step, onBack = { if (!busy) onBack() },
+        title = tr(Message.PutYourStakeInPlay),
+        body = when {
+            covered -> tr(Message.YourStakeMeetsTheSkrMinimum, skr(min))
+            // Actif mais sous le seuil : le decay a mangé le staking, et le
+            // compléter est la seule sortie.
+            staked -> tr(Message.YourStakeFellBelowSkrTopIt, skr(min))
+            else -> tr(Message.OnboardingStakeExplanation, skr(min), decayPercent(state))
+        },
+        error = error,
+        titleFirst = true,
+        illustration = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (staked) Text(tr(Message.AlreadyStakedSkr, skr(state.balance)),
+                    style = TitleMd, color = Success)
+                if (picking) AmountPicker(
                     value = amount, min = min, step = min, max = balance, presets = presets,
-                    supporting = when {
-                        // Actif mais sous le seuil : le decay a mangé la mise, et la
-                        // compléter est la seule sortie.
-                        staked -> tr(Message.YourStakeFellBelowSkrTopIt, skr(min))
-                        enough -> tr(Message.ADayWithoutAMomentCosts2, decayPercent(state))
-                        else -> tr(Message.YouNeedSkrYourBalanceIsSkr, skr(min), skr(balance))
-                    },
+                    supporting = if (enough) tr(Message.ADayWithoutAMomentCosts2, decayPercent(state))
+                        else tr(Message.YouNeedSkrYourBalanceIsSkr, skr(min), skr(balance)),
                     error = !enough,
                     onChange = { amount = it },
-                )
-                error?.let { Text(it, style = BodyMd, color = Danger) }
+                ) else StakePreview(state)
+            }
+        },
+        actions = {
+            if (covered) {
+                PrimaryButton(if (busy) tr(Message.Signing) else tr(Message.Continue),
+                    enabled = !busy, onClick = onContinue)
+                if (!adding) TextButton(
+                    onClick = { adding = true }, enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr(Message.AddToMyStake), color = Accent) }
+                else TextButton(
+                    onClick = { onStake(amount) }, enabled = !busy && canAdd,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr(Message.AddSkrToMyStake, skr(amount)), color = if (canAdd) Accent else Muted) }
+            } else {
                 PrimaryButton(
                     if (busy) tr(Message.Signing) else tr(Message.StakeSkr, skr(amount)),
                     enabled = enough && canAdd, loading = busy,
                 ) { onStake(amount) }
-                // Sans mise suffisante, le fil ne s'ouvrira jamais : un solde trop
-                // court doit garder une issue, sinon la feuille devient une impasse.
+                // Sans solde suffisant, le fil ne s'ouvrira jamais : l'écran
+                // doit garder une issue, sinon il devient une impasse.
                 if (!enough) {
                     if (!state.faucetClaimed) TextButton(
                         onClick = onFaucet, enabled = !busy,
@@ -710,9 +716,10 @@ private fun StakeSheet(
                     ) { Text(tr(Message.ChangeWallet), color = Muted) }
                 }
             }
+            Spacer(Modifier.height(8.dp))
             SheetNote(tr(Message.NetworkFeesLessThanSol))
-        }
-    }
+        },
+    )
 }
 
 /**

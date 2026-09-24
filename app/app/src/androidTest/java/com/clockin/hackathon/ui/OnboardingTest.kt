@@ -43,7 +43,7 @@ class OnboardingTest {
         compose.onNodeWithText("Continuer").performClick()
         compose.onNodeWithText("Un seul cercle").assertIsDisplayed()
         compose.onNodeWithText("Continuer").performClick()
-        compose.onNodeWithText("Joue avec une mise").assertIsDisplayed()
+        compose.onNodeWithText("Joue avec un staking de SKR").assertIsDisplayed()
         compose.onNodeWithText("Continuer").performClick()
         compose.onNodeWithText("Publie, reçois ta part").assertIsDisplayed()
         compose.onNodeWithText("Continuer").performClick()
@@ -89,22 +89,6 @@ class OnboardingTest {
         compose.runOnIdle { assertEquals(1, connections) }
     }
 
-    @Test fun home_and_capture_are_the_only_bottom_actions() {
-        var captures = 0
-        compose.setContent {
-            MaterialTheme {
-                BottomBar(onHome = {}, onCapture = { captures++ })
-            }
-        }
-        val initialBounds = compose.onNodeWithText("Capturer").fetchSemanticsNode().boundsInRoot
-        compose.onNodeWithText("Capturer").performClick()
-        compose.onNodeWithText("Accueil").performClick().assertIsSelected()
-        compose.onNodeWithText("Moi").assertDoesNotExist()
-        compose.onNodeWithText("Capturer").assertIsDisplayed().performClick()
-        compose.runOnIdle { assertEquals(2, captures) }
-        assertEquals(initialBounds, compose.onNodeWithText("Capturer").fetchSemanticsNode().boundsInRoot)
-    }
-
     // ── L'écran 7, la mise ─────────────────────────────────────────────────
 
     /** Un état de chaîne avec une mise déjà prise de [staked], minimum à 500 SKR. */
@@ -135,10 +119,10 @@ class OnboardingTest {
     /** Mise déjà suffisante : un seul geste suffit pour quitter l'écran. */
     @Test fun a_stake_above_the_minimum_lets_the_seventh_screen_pass_in_one_tap() {
         stakeScreen(stakedState(500 * SKR))
-        compose.onNodeWithText("Mets ta mise en jeu").assertIsDisplayed()
+        compose.onNodeWithText("Stake tes SKR").assertIsDisplayed()
         // Rien à choisir : le sélecteur reste replié derrière « Ajouter ».
-        compose.onNodeWithText("Mettre en jeu", substring = true).assertDoesNotExist()
-        compose.onNodeWithText("Ajouter à ma mise").assertIsDisplayed()
+        compose.onNodeWithText("Staker ", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Ajouter à mon staking").assertIsDisplayed()
         screenshot("07-mise-couverte")
         compose.onNodeWithText("Continuer").assertIsEnabled().performClick()
         compose.onNodeWithText("Deux autorisations").assertIsDisplayed()
@@ -148,6 +132,6 @@ class OnboardingTest {
     @Test fun a_stake_below_the_minimum_still_has_to_be_topped_up() {
         stakeScreen(stakedState(100 * SKR))
         compose.onNodeWithText("Continuer").assertDoesNotExist()
-        compose.onNodeWithText("Mettre en jeu", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Staker ", substring = true).assertIsDisplayed()
     }
 }

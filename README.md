@@ -57,7 +57,7 @@ Prérequis : un déploiement devnet renseigné dans `app/local.properties`
 Solana Mobile installé.
 
 1. Installer l'APK, puis **Découvrir Moment**.
-2. Ouvrir le profil par l’avatar, recevoir 100 SKR de test puis miser 50 SKR. Chaque étape est une transaction signée par le wallet.
+2. Ouvrir le profil par l’avatar, recevoir 1000 SKR de test puis staker 500 SKR. Chaque étape est une transaction signée par le wallet.
 3. Revenir à Home et appuyer sur **Capturer mon Moment** ou **Capturer** pour ouvrir la sheet plein écran, autoriser la caméra, capturer la scène, puis prendre le selfie.
 4. Vérifier les deux images, reprendre si besoin, puis publier : le wallet signe la connexion au backend si nécessaire, le manifeste, puis la transaction `check_in` cosignée par le serveur.
 5. Vérifier le compte `CheckIn` du jour dans un explorateur devnet : son `commitment` est le SHA-256 du manifeste signé.
@@ -115,8 +115,8 @@ Instructions : `initialize_config`, `update_config`, `set_publication_authority`
 `check_in` exige une **co-signature de l'autorité de publication** : un client modifié
 ne peut ni publier ni toucher de récompense sans le contrôle serveur.
 
-Paramètres en vigueur : mise minimum 10 SKR, rendement 1 %/jour plafonné à 1 SKR,
-decay 25 % par jour manqué borné à 30 jours, sortie à 48 h, faucet 100 SKR.
+Paramètres en vigueur : staking minimum 500 SKR, rendement 1 %/jour plafonné à 1 SKR,
+decay 25 % par jour manqué borné à 30 jours, sortie à 48 h, faucet 1000 SKR.
 
 ```sh
 cd program

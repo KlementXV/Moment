@@ -82,6 +82,19 @@ pub struct Expected {
     pub blob_ref: Key,
 }
 
+/// ComputeBudget111111111111111111111111111111
+const COMPUTE_BUDGET: Key = [
+    3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140, 229, 187,
+    197, 247, 18, 107, 44, 67, 155, 58, 64, 0, 0, 0,
+];
+/// Bounds on priority fees paid by the wallet (the authority never pays).
+const MAX_COMPUTE_UNITS: u32 = 400_000;
+const MAX_MICRO_LAMPORTS: u64 = 1_000_000;
+
+/// Validates a legacy `check_in` transaction by meaning, not by byte layout:
+/// wallets (Seeker, web3.js) re-sort account keys and add priority fees, so
+/// the account order may vary. Only one `check_in` plus at most one
+/// SetComputeUnitLimit and one SetComputeUnitPrice are accepted.
 pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
     if raw.len() > 1232 {
         return Err(invalid());
@@ -93,13 +106,33 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
     let owner_sig = r.array::<64>()?;
     let authority_sig = r.array::<64>()?;
     let message_offset = r.position();
-    // Exactly two signers, authority read-only; exactly system and program read-only unsigned.
-    if r.array::<3>()? != [2, 1, 2] || r.short()? != 7 {
+    let [signers, readonly_signed, readonly_unsigned] = r.array::<3>()?;
+    let count = r.short()?;
+    if signers != 2 || readonly_signed != 1 || !(7..=8).contains(&count) {
         return Err(invalid());
     }
-    let mut keys = Vec::with_capacity(7);
-    for _ in 0..7 {
+    let mut keys = Vec::with_capacity(count);
+    for _ in 0..count {
         keys.push(r.array::<32>()?);
+    }
+    for i in 0..count {
+        if keys[..i].contains(&keys[i]) {
+            return Err(invalid());
+        }
+    }
+    if keys[0] != expected.wallet || keys[1] != expected.authority {
+        return Err(invalid());
+    }
+    let readonly_unsigned = readonly_unsigned as usize;
+    if readonly_unsigned + 2 > count {
+        return Err(invalid());
+    }
+    let writable_unsigned = |i: usize| i >= 2 && i < count - readonly_unsigned;
+    let readonly_nonsigner = |i: usize| i >= count - readonly_unsigned;
+    let hash = r.array()?;
+    let instructions = r.short()?;
+    if !(1..=3).contains(&instructions) {
+        return Err(invalid());
     }
     let config = pda(&expected.program, &[b"config"]).0;
     let profile = pda(&expected.program, &[b"profile", &expected.wallet]).0;
@@ -108,50 +141,77 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
         &[b"checkin", &expected.wallet, &expected.day.to_le_bytes()],
     )
     .0;
-    if keys[0] != expected.wallet || keys[1] != expected.authority {
-        return Err(invalid());
-    }
-    for i in 0..7 {
-        if keys[..i].contains(&keys[i]) {
+    let mut used = vec![false; count];
+    used[0] = true;
+    used[1] = true;
+    let (mut check_ins, mut limit, mut price) = (0, false, false);
+    for _ in 0..instructions {
+        let program_index = r.u8()? as usize;
+        let program = *keys.get(program_index).ok_or_else(invalid)?;
+        if !readonly_nonsigner(program_index) {
             return Err(invalid());
         }
-    }
-    let hash = r.array()?;
-    if r.short()? != 1 {
-        return Err(invalid());
-    }
-    let program_index = r.u8()? as usize;
-    if keys.get(program_index) != Some(&expected.program) || program_index < 5 || r.short()? != 6 {
-        return Err(invalid());
-    }
-    let expected_accounts = [
-        expected.wallet,
-        expected.authority,
-        config,
-        profile,
-        checkin,
-        [0; 32],
-    ];
-    for (position, key) in expected_accounts.iter().enumerate() {
-        let index = r.u8()? as usize;
-        if keys.get(index) != Some(key)
-            || match position {
-                0 => index != 0,
-                1 => index != 1,
-                2..=4 => !(2..5).contains(&index),
-                _ => index < 5,
+        used[program_index] = true;
+        if program == expected.program {
+            check_ins += 1;
+            if r.short()? != 6 {
+                return Err(invalid());
             }
-        {
+            let expected_accounts = [
+                expected.wallet,
+                expected.authority,
+                config,
+                profile,
+                checkin,
+                [0; 32],
+            ];
+            for (position, key) in expected_accounts.iter().enumerate() {
+                let index = r.u8()? as usize;
+                if keys.get(index) != Some(key)
+                    || match position {
+                        0 => index != 0,
+                        1 => index != 1,
+                        2..=4 => !writable_unsigned(index),
+                        _ => !readonly_nonsigner(index),
+                    }
+                {
+                    return Err(invalid());
+                }
+                used[index] = true;
+            }
+            if r.short()? != 80
+                || r.array::<8>()? != discriminator("global:check_in")
+                || r.i64()? != expected.day
+                || r.array::<32>()? != expected.commitment
+                || r.array::<32>()? != expected.blob_ref
+            {
+                return Err(invalid());
+            }
+        } else if program == COMPUTE_BUDGET {
+            if r.short()? != 0 {
+                return Err(invalid());
+            }
+            match (r.short()?, r.u8()?) {
+                (5, 2) if !limit => {
+                    limit = true;
+                    let units = u32::from_le_bytes(r.array()?);
+                    if units > MAX_COMPUTE_UNITS {
+                        return Err(invalid());
+                    }
+                }
+                (9, 3) if !price => {
+                    price = true;
+                    if u64::from_le_bytes(r.array()?) > MAX_MICRO_LAMPORTS {
+                        return Err(invalid());
+                    }
+                }
+                _ => return Err(invalid()),
+            }
+        } else {
             return Err(invalid());
         }
     }
-    if r.short()? != 80
-        || r.array::<8>()? != discriminator("global:check_in")
-        || r.i64()? != expected.day
-        || r.array::<32>()? != expected.commitment
-        || r.array::<32>()? != expected.blob_ref
-        || !r.done()
-    {
+    if check_ins != 1 || used.contains(&false) || !r.done() {
         return Err(invalid());
     }
     if owner_sig != [0; 64] {
@@ -178,7 +238,15 @@ pub struct RpcChain {
     client: reqwest::Client,
     url: String,
     program: Key,
+    /// Comptes récemment lus. Un chargement du feed relit les mêmes PDA (config,
+    /// profil, check-ins) pour la liste puis pour chaque blob : sans ce cache, le
+    /// RPC public (≈40 getAccountInfo / 10 s par IP) répond 429 dès quelques posts.
+    accounts: std::sync::Mutex<std::collections::HashMap<Key, (std::time::Instant, Vec<u8>)>>,
 }
+/// Assez court pour qu'une mise ou une sortie se voie presque aussitôt.
+const ACCOUNT_TTL: std::time::Duration = std::time::Duration::from_secs(5);
+/// Réessais après un 429 du RPC, avant d'abandonner en 503.
+const RATE_LIMIT_RETRIES: [u64; 2] = [400, 1200];
 impl RpcChain {
     pub fn new(url: String, program: Key) -> Result<Self> {
         let parsed = reqwest::Url::parse(&url).map_err(|_| Error::unavailable())?;
@@ -194,6 +262,7 @@ impl RpcChain {
             client,
             url,
             program,
+            accounts: Default::default(),
         })
     }
     /// Pin the RPC to its full genesis hash (CAIP-2 network names are truncated).
@@ -210,13 +279,23 @@ impl RpcChain {
         Ok(())
     }
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
-        let mut response = self
-            .client
-            .post(&self.url)
-            .json(&json!({"jsonrpc":"2.0","id":1,"method":method,"params":params}))
-            .send()
-            .await
-            .map_err(|_| Error::unavailable())?;
+        let body = json!({"jsonrpc":"2.0","id":1,"method":method,"params":params});
+        let mut retries = RATE_LIMIT_RETRIES.iter();
+        let mut response = loop {
+            let response = self
+                .client
+                .post(&self.url)
+                .json(&body)
+                .send()
+                .await
+                .map_err(|_| Error::unavailable())?;
+            match (response.status(), retries.next()) {
+                (reqwest::StatusCode::TOO_MANY_REQUESTS, Some(&delay)) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay)).await
+                }
+                _ => break response,
+            }
+        };
         if !response.status().is_success() {
             return Err(Error::unavailable());
         }
@@ -234,6 +313,22 @@ impl RpcChain {
         value.get("result").cloned().ok_or_else(Error::unavailable)
     }
     async fn account(&self, address: Key, name: &str, len: usize) -> Result<Option<Vec<u8>>> {
+        if let Some((at, bytes)) = self.accounts.lock().ok().and_then(|c| c.get(&address).cloned()) {
+            if at.elapsed() < ACCOUNT_TTL && bytes.len() == len && bytes[..8] == discriminator(name) {
+                return Ok(Some(bytes));
+            }
+        }
+        let bytes = self.fetch_account(address, name, len).await?;
+        // Seuls les comptes existants sont gardés : un check-in tout juste créé
+        // doit être vu dès la lecture suivante.
+        if let (Some(bytes), Ok(mut cache)) = (&bytes, self.accounts.lock()) {
+            let now = std::time::Instant::now();
+            cache.retain(|_, (at, _)| now.duration_since(*at) < ACCOUNT_TTL);
+            cache.insert(address, (now, bytes.clone()));
+        }
+        Ok(bytes)
+    }
+    async fn fetch_account(&self, address: Key, name: &str, len: usize) -> Result<Option<Vec<u8>>> {
         let result = self.rpc("getAccountInfo", json!([protocol::address_string(&address), {"encoding":"base64","commitment":"confirmed"}])).await?;
         let value = result.get("value").ok_or_else(Error::unavailable)?;
         if value.is_null() {
@@ -425,6 +520,51 @@ mod tests {
                 "offset {offset}"
             );
         }
+    }
+    /// Same shape as the Seeker wallet output: keys re-sorted, priority fees first.
+    fn wallet_shaped(e: &Expected, price: u64) -> Vec<u8> {
+        let keys = [
+            e.wallet,
+            e.authority,
+            pda(&e.program, &[b"profile", &e.wallet]).0,
+            pda(&e.program, &[b"checkin", &e.wallet, &e.day.to_le_bytes()]).0,
+            pda(&e.program, &[b"config"]).0,
+            COMPUTE_BUDGET,
+            e.program,
+            [0; 32],
+        ];
+        let mut raw = vec![2];
+        raw.extend_from_slice(&[0; 128]);
+        raw.extend_from_slice(&[2, 1, 3, 8]);
+        for key in keys {
+            raw.extend_from_slice(&key);
+        }
+        raw.extend_from_slice(&[6; 32]);
+        raw.push(3);
+        raw.extend_from_slice(&[5, 0, 5, 2]);
+        raw.extend_from_slice(&200_000u32.to_le_bytes());
+        raw.extend_from_slice(&[5, 0, 9, 3]);
+        raw.extend_from_slice(&price.to_le_bytes());
+        raw.extend_from_slice(&[6, 6, 0, 1, 4, 2, 3, 7, 80]);
+        raw.extend_from_slice(&discriminator("global:check_in"));
+        raw.extend_from_slice(&e.day.to_le_bytes());
+        raw.extend_from_slice(&e.commitment);
+        raw.extend_from_slice(&e.blob_ref);
+        raw
+    }
+    #[test]
+    fn accepts_reordered_keys_and_bounded_priority_fees() {
+        let (_, e, owner, authority) = fixture();
+        let mut raw = wallet_shaped(&e, 100_000);
+        let sig = owner.sign(&raw[129..]).to_bytes();
+        raw[1..65].copy_from_slice(&sig);
+        let signed = cosign(&raw, &e, &authority).unwrap();
+        assert_eq!(&signed[..65], &raw[..65]);
+        protocol::verify(&e.authority, &signed[129..], &signed[65..129]).unwrap();
+        assert!(validate_transaction(&wallet_shaped(&e, MAX_MICRO_LAMPORTS + 1), &e).is_err());
+        let mut writable_system = wallet_shaped(&e, 100_000);
+        writable_system[131] = 2; // system program would become writable
+        assert!(validate_transaction(&writable_system, &e).is_err());
     }
     #[test]
     fn eligibility_matches_compounding_decay_and_unlock_boundary() {

@@ -174,6 +174,8 @@ pub struct Packet {
     pub rear: Zeroizing<Vec<u8>>,
     pub front: Zeroizing<Vec<u8>>,
 }
+/// UTF-8 bytes; the app caps captions at 80 characters (4 bytes max each).
+pub const MAX_CAPTION: usize = 80 * 4;
 impl Packet {
     pub fn decrypt(blob: &[u8], key: &Key) -> Result<Self> {
         if blob.len() > MAX_BLOB {
@@ -181,7 +183,13 @@ impl Packet {
         }
         let plain = open(blob, key, PACKET_DOMAIN)?;
         let mut r = Reader::new(&plain);
-        if r.take(PACKET_DOMAIN.len())? != PACKET_DOMAIN || r.u8()? != 1 {
+        if r.take(PACKET_DOMAIN.len())? != PACKET_DOMAIN {
+            return Err(Error::bad(
+                "Version de paquet inconnue. Actualisez l’application.",
+            ));
+        }
+        let version = r.u8()?;
+        if !(1..=2).contains(&version) {
             return Err(Error::bad(
                 "Version de paquet inconnue. Actualisez l’application.",
             ));
@@ -201,6 +209,13 @@ impl Packet {
             .map_err(|_| Error::bad("Signature invalide. Signez à nouveau."))?;
         let rear = Zeroizing::new(field(&mut r, MAX_PHOTO)?.to_vec());
         let front = Zeroizing::new(field(&mut r, MAX_PHOTO)?.to_vec());
+        // v2: encrypted caption (may be empty), authenticated by the on-chain blob_ref.
+        if version == 2 {
+            let n = u32::from_le_bytes(r.array()?) as usize;
+            if n > MAX_CAPTION || std::str::from_utf8(r.take(n)?).is_err() {
+                return Err(Error::bad("Légende invalide. Raccourcissez-la."));
+            }
+        }
         if !r.done() {
             return Err(Error::bad(
                 "Paquet non canonique. Actualisez l’application.",

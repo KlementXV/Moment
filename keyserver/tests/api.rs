@@ -236,10 +236,16 @@ impl Harness {
         let manifest = manifest(PROGRAM, wallet, DAY, [salt; 16], &rear, &front);
         let signature = user.sign(&manifest).to_bytes();
         let mut packet = protocol::PACKET_DOMAIN.to_vec();
-        packet.push(1);
+        // Odd salts use packet v2 (with caption), even salts keep v1 covered.
+        let caption: &[u8] = "Légende ✓".as_bytes();
+        packet.push(if salt % 2 == 1 { 2 } else { 1 });
         for bytes in [&manifest[..], &signature, &rear, &front] {
             packet.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
             packet.extend_from_slice(bytes);
+        }
+        if salt % 2 == 1 {
+            packet.extend_from_slice(&(caption.len() as u32).to_le_bytes());
+            packet.extend_from_slice(caption);
         }
         let key = [salt; 32];
         let blob = protocol::seal(&packet, &key, protocol::PACKET_DOMAIN).unwrap();
@@ -449,6 +455,58 @@ async fn two_wallets_publish_confirm_and_decrypt_but_lurker_cannot_read() {
         next["items"][0]["commitment"]
     );
     assert!(next["nextCursor"].is_null());
+}
+
+#[tokio::test]
+async fn members_like_and_unlike_todays_posts_but_lurkers_cannot() {
+    let h = Harness::new().await;
+    let alice = SigningKey::from_bytes(&[1; 32]);
+    let bob = SigningKey::from_bytes(&[2; 32]);
+    let lurker = SigningKey::from_bytes(&[3; 32]);
+    let a = h.auth(&alice).await;
+    let b = h.auth(&bob).await;
+    let l = h.auth(&lurker).await;
+    let post = h.publish(&alice, &a, 11).await;
+    h.publish(&bob, &b, 12).await;
+    let like = format!("/v1/posts/{}/like", post["commitment"].as_str().unwrap());
+    for _ in 0..2 {
+        let (status, body) = h.request("PUT", &like, Some(&b), json!(null)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, json!({"likes": 1, "liked": true}));
+    }
+    assert_eq!(
+        h.request("PUT", &like, Some(&l), json!(null)).await.0,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        h.request("PUT", &like, None, json!(null)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let unknown = format!("/v1/posts/{}/like", "ab".repeat(32));
+    assert_eq!(
+        h.request("PUT", &unknown, Some(&b), json!(null)).await.0,
+        StatusCode::NOT_FOUND
+    );
+    let path = format!("/v1/feed?day={DAY}");
+    let item = |feed: &Value| {
+        feed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["commitment"] == post["commitment"])
+            .cloned()
+            .unwrap()
+    };
+    let (_, feed) = h.request("GET", &path, Some(&a), json!(null)).await;
+    assert_eq!(
+        (item(&feed)["likes"].clone(), item(&feed)["liked"].clone()),
+        (json!(1), json!(false))
+    );
+    let (_, feed) = h.request("GET", &path, Some(&b), json!(null)).await;
+    assert_eq!(item(&feed)["liked"], json!(true));
+    let (status, body) = h.request("DELETE", &like, Some(&b), json!(null)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body, json!({"likes": 0, "liked": false}));
 }
 
 #[tokio::test]
@@ -730,7 +788,7 @@ async fn session_replay_wrong_signer_unknown_expiry_and_token_expiry() {
     );
     let session = if a.0 == StatusCode::OK { a.1 } else { b.1 };
     let token = session["token"].as_str().unwrap();
-    h.clock.0.fetch_add(901, Ordering::SeqCst);
+    h.clock.0.fetch_add(30 * 86_400 + 1, Ordering::SeqCst);
     assert_eq!(
         h.request(
             "GET",

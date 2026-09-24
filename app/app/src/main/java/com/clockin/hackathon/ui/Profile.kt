@@ -8,18 +8,31 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -29,7 +42,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,13 +77,13 @@ private const val NB = " "
 /** Valeurs de repli quand la Config on-chain n'est pas encore lue. */
 private const val DEFAULT_REWARD_BPS = 100
 private const val DEFAULT_WITHDRAWAL_SECONDS = 172_800L
-private const val DEFAULT_FAUCET = 100 * SKR
+private const val DEFAULT_FAUCET = 1000 * SKR
 
 /**
  * Page « Moi », sur la maquette : identité, solde, mise, pool, puis le reste.
  *
  * Le haut suit la maquette au pixel ; ce qu'elle ne montre pas — faucet, choix
- * de mise, règles, démo — reste en dessous, dans le même design-system. L'ordre
+ * de mise, règles, langue — reste en dessous, dans le même design-system. L'ordre
  * garde l'urgence : l'action du moment vient juste après les deux cartes, avant
  * les sections qu'on ne consulte que par curiosité.
  */
@@ -98,14 +110,13 @@ internal fun Profile(
     onCancel: () -> Unit,
     onWithdraw: () -> Unit,
     demoFeed: Boolean,
-    onDemoFeedChange: (Boolean) -> Unit,
 ) {
     val exiting = state.exitUnlockAt > 0
     val withdrawable = exiting && now >= state.exitUnlockAt
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(32.dp)) {
         Identity(wallet, nickname, skrName, skrLoading, skrFailed, onRetrySkr, onNicknameChange)
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Stake(state, now, wallet, busy, exiting, withdrawable, onExit, onCancel)
+            Stake(state, now, wallet, busy, exiting, withdrawable, onExit, onCancel, onFaucet, onStake)
             Pool(state, demoFeed)
         }
         if (error != null) ErrorCard(error)
@@ -113,14 +124,13 @@ internal fun Profile(
             wallet == null -> ConnectSection(busy, onConnect)
             withdrawable -> WithdrawSection(state, busy, onWithdraw)
             exiting -> ExitPendingSection(state, now, busy, onCancel)
-            !state.faucetClaimed -> FaucetSection(state, busy, onFaucet)
-            else -> StakeSection(state, busy, onStake)
+            // Sans mise, choisir son montant est l'action du moment : elle reste
+            // en page. Une fois la mise ouverte, la compléter passe en popup.
+            !state.active -> AddSkr(state, busy, onFaucet, onStake)
         }
         Favorites(favorites, onToggleFavorite)
         Activity()
-        Rules(state, now)
-        LanguageSettings()
-        DemoSection(demoFeed, onDemoFeedChange)
+        SettingsSection(state, now)
         if (wallet != null) WalletActions(wallet, busy, onDisconnect)
     }
 }
@@ -210,7 +220,9 @@ internal fun validNickname(value: String): Boolean = value.trim().let { text ->
 private fun Stake(
     state: ChainState, now: Long, wallet: String?, busy: Boolean,
     exiting: Boolean, withdrawable: Boolean, onExit: () -> Unit, onCancel: () -> Unit,
+    onFaucet: () -> Unit, onStake: (Long) -> Unit,
 ) {
+    var adding by rememberSaveable { mutableStateOf(false) }
     val left = secondsUntilNextMoment(now)
     val urgent = !state.posted && left <= URGENT_SECONDS
     val below = state.active && state.balance < state.minStake
@@ -246,7 +258,14 @@ private fun Stake(
         },
         actionEnabled = !busy,
         onAction = if (exiting) onCancel else onExit,
+        // Compléter le staking se fait depuis la carte, à côté du retrait.
+        secondAction = if (wallet != null && state.active && !exiting) tr(Message.AddSkr) else null,
+        onSecondAction = { adding = true },
     )
+    if (adding) ProfileDialog(tr(Message.AddSkr), { adding = false }) {
+        AddSkr(state, busy, onFaucet = { onFaucet(); adding = false },
+            onStake = { onStake(it); adding = false })
+    }
 }
 
 /**
@@ -460,17 +479,14 @@ private fun WalletActions(wallet: String, busy: Boolean, onDisconnect: () -> Uni
 
 /** Les paramètres affichés sont ceux de la Config lue sur la chaîne. */
 @Composable
-private fun Rules(state: ChainState, now: Long) {
+private fun RulesContent(state: ChainState, now: Long) {
     val config = state.config
     val decay = percent(state.decayBps)
     val reward = percent(config?.rewardRateBps ?: DEFAULT_REWARD_BPS)
     val cap = config?.rewardCap ?: SKR
     val hours = (config?.withdrawalDelaySeconds ?: DEFAULT_WITHDRAWAL_SECONDS) / 3600
-    Column(
-        Modifier.fillMaxWidth().clip(CardShape).background(Panel).padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(tr(Message.HowItWorks), style = TitleMd)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        RulesDiagram(reward, decay)
         Rule(tr(Message.EachConfirmedMomentCanEarnYouOf, reward, NB, skr(cap), NB))
         Rule(tr(Message.EachDayWithoutAMomentCostsOf, decay, NB, nextMomentAt(now)))
         Rule(tr(Message.AfterAWithdrawalRequestYourStakeBecomes, hours, NB))
@@ -502,36 +518,6 @@ private fun ErrorCard(message: String) {
     }
 }
 
-/**
- * Le cercle reste vide tant que le keyserver ne distribue pas les clés des
- * autres. Cet interrupteur le peuple de Moments illustrés pour qu'on puisse
- * juger le rendu du feed — chaque carte porte la pastille « Démo ».
- */
-@Composable
-internal fun DemoSection(enabled: Boolean, onChange: (Boolean) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionTitle(tr(Message.Demo))
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(Panel)
-                .clickable { onChange(!enabled) }.heightIn(min = 56.dp).padding(18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(tr(Message.ShowDemoMoments), style = TitleMd)
-                Text(
-                    tr(Message.DemoExplanation),
-                    color = Muted, style = BodyMd,
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Switch(
-                checked = enabled, onCheckedChange = onChange,
-                colors = SwitchDefaults.colors(checkedThumbColor = Ink, checkedTrackColor = Accent),
-            )
-        }
-    }
-}
-
 @Composable
 private fun SectionTitle(text: String) {
     Text(text, style = HeadlineSm)
@@ -547,16 +533,110 @@ private fun explorerUrl(wallet: String): String {
 private fun percent(bps: Int): String =
     if (bps % 100 == 0) "${bps / 100}" else String.format(AppLanguage.locale, "%.2f", bps / 100.0)
 
-/** The same persisted selection is available after onboarding, even without a wallet. */
+/** La même sélection persistée qu'à l'onboarding, disponible même sans wallet. */
 @Composable
-private fun LanguageSettings() {
+private fun LanguageContent() {
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        SectionTitle(tr(Message.Language))
         LanguagePicker(AppLanguage.code, AppLanguage.deviceCode, AppLanguage::select)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(tr(Message.UseDeviceLanguage), Modifier.weight(1f), style = BodyMd)
             Switch(checked = AppLanguage.selection == null,
                 onCheckedChange = { follow -> AppLanguage.select(if (follow) null else AppLanguage.code) })
         }
+    }
+}
+
+// ── Réglages : deux boutons, deux popups ────────────────────────────────
+
+private enum class ProfileSheet { Rules, Language }
+
+/**
+ * Ce qu'on ne consulte que de temps en temps tient en deux boutons ; le
+ * contenu s'ouvre en popup au lieu d'allonger la page.
+ */
+@Composable
+private fun SettingsSection(state: ChainState, now: Long) {
+    var open by rememberSaveable { mutableStateOf<ProfileSheet?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        SectionTitle(tr(Message.Settings))
+        TonalButton(tr(Message.GameRules)) { open = ProfileSheet.Rules }
+        TonalButton(tr(Message.ChangeLanguage)) { open = ProfileSheet.Language }
+    }
+    val close = { open = null }
+    when (open) {
+        ProfileSheet.Rules -> ProfileDialog(tr(Message.HowItWorks), close) { RulesContent(state, now) }
+        ProfileSheet.Language -> ProfileDialog(tr(Message.Language), close) { LanguageContent() }
+        null -> Unit
+    }
+}
+
+/** Le faucet d'abord s'il n'a pas servi, sinon le choix du montant. */
+@Composable
+private fun AddSkr(state: ChainState, busy: Boolean, onFaucet: () -> Unit, onStake: (Long) -> Unit) {
+    if (!state.faucetClaimed) FaucetSection(state, busy, onFaucet)
+    else StakeSection(state, busy, onStake)
+}
+
+@Composable
+private fun ProfileDialog(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(CardShape).background(PanelRaised)
+                .verticalScroll(rememberScrollState()).padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            Text(title, style = HeadlineSm)
+            content()
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) {
+                Text(tr(Message.Close), color = Accent)
+            }
+        }
+    }
+}
+
+/**
+ * Le schéma des règles : la mise part vers le jour, et le jour tombe
+ * alternativement du bon côté (Moment publié, récompense) et du mauvais
+ * (jour manqué, pénalité). Une boucle de six secondes, trois pour chaque issue.
+ */
+@Composable
+private fun RulesDiagram(reward: String, decay: String) {
+    val transition = rememberInfiniteTransition(label = "rules")
+    val phase by transition.animateFloat(0f, 2f,
+        infiniteRepeatable(tween(6000, easing = LinearEasing)), label = "phase")
+    val posted = phase < 1f
+    val progress = ((phase % 1f) / .6f).coerceAtMost(1f)
+    val tone = if (posted) Success else Danger
+    val arrived by animateFloatAsState(if (progress >= 1f) 1f else .35f, label = "arrived")
+    Row(
+        Modifier.fillMaxWidth().clip(RadiusLg).background(Panel).padding(16.dp)
+            .semantics { contentDescription = tr(Message.HowItWorks) },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        DiagramNode(tr(Message.RulesStepStake), "SKR", Accent, 1f)
+        Canvas(Modifier.weight(1f).height(24.dp).padding(horizontal = 6.dp)) {
+            val y = size.height / 2
+            val stroke = 2.dp.toPx()
+            drawLine(Muted.copy(alpha = .3f), Offset(0f, y), Offset(size.width, y), stroke,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 6f)))
+            drawLine(tone, Offset(0f, y), Offset(size.width * progress, y), stroke)
+            drawCircle(tone, 5.dp.toPx(), Offset(size.width * progress, y))
+        }
+        DiagramNode(
+            if (posted) tr(Message.RulesStepPosted) else tr(Message.RulesStepMissed),
+            if (posted) "+$reward$NB%" else "−$decay$NB%", tone, arrived,
+        )
+    }
+}
+
+@Composable
+private fun DiagramNode(label: String, value: String, tone: Color, alpha: Float) {
+    Column(Modifier.width(92.dp).alpha(alpha), horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(56.dp).clip(CircleShape).background(tone.copy(alpha = .12f))
+            .border(1.5.dp, tone, CircleShape), contentAlignment = Alignment.Center) {
+            Text(value, color = tone, style = TitleSm)
+        }
+        Text(label, color = Muted, style = LabelSm, maxLines = 1)
     }
 }

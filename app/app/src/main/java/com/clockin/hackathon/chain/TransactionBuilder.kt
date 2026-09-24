@@ -12,12 +12,31 @@ import com.solana.transaction.toUnsignedTransaction
  * et placer une signature au mauvais index produit une transaction invalide. */
 object TransactionBuilder {
     const val SIGNATURE_SIZE = 64
+    val COMPUTE_BUDGET_PROGRAM = SolanaPublicKey.from("ComputeBudget111111111111111111111111111111")
+    const val COMPUTE_UNIT_LIMIT = 200_000
+    const val COMPUTE_UNIT_PRICE = 100_000L // micro-lamports
+
+    /** Les wallets (ex. Seeker) ajoutent des frais de priorité quand la
+     * transaction n'en contient pas, ce qui change le message et invalide une
+     * cosignature. On les fixe donc nous-mêmes, en tête de transaction. */
+    fun computeBudget(): List<TransactionInstruction> {
+        val limit = java.nio.ByteBuffer.allocate(5).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .put(2).putInt(COMPUTE_UNIT_LIMIT).array()
+        val price = java.nio.ByteBuffer.allocate(9).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+            .put(3).putLong(COMPUTE_UNIT_PRICE).array()
+        return listOf(
+            TransactionInstruction(COMPUTE_BUDGET_PROGRAM, emptyList(), limit),
+            TransactionInstruction(COMPUTE_BUDGET_PROGRAM, emptyList(), price),
+        )
+    }
 
     fun build(
         instructions: List<TransactionInstruction>,
         feePayer: SolanaPublicKey,
         blockhash: String,
     ): Transaction {
+        val instructions = if (instructions.any { it.programId == COMPUTE_BUDGET_PROGRAM }) instructions
+            else computeBudget() + instructions
         val builder = Message.Builder()
         instructions.forEach { builder.addInstruction(it) }
         val built = builder.setRecentBlockhash(blockhash).build() as LegacyMessage
@@ -83,5 +102,45 @@ object TransactionBuilder {
         return serialized.copyOf().also {
             signature.copyInto(it, 1 + index * SIGNATURE_SIZE)
         }
+    }
+
+    data class Account(val key: List<Byte>, val signer: Boolean, val writable: Boolean)
+    data class Instruction(val program: List<Byte>, val accounts: List<Account>, val data: List<Byte>)
+    data class Decoded(val signerKeys: List<List<Byte>>, val blockhash: List<Byte>, val instructions: List<Instruction>)
+
+    /** Décompile un message legacy en instructions indépendantes de l'ordre des
+     * comptes. Les wallets (Seeker, web3.js) retrient les comptes : on compare
+     * alors le sens de la transaction, pas ses octets. */
+    fun decode(message: ByteArray): Decoded {
+        var r = 0
+        fun u8(): Int { require(r < message.size); return message[r++].toInt() and 0xff }
+        fun short(): Int { val v = u8(); require(v < 0x80) { "compact-u16 long non géré" }; return v }
+        fun bytes(n: Int): List<Byte> { require(r + n <= message.size); return message.copyOfRange(r, r + n).toList().also { r += n } }
+        require(message.isNotEmpty() && (message[0].toInt() and 0x80) == 0) { "message versionné non géré" }
+        val signers = u8(); val readonlySigned = u8(); val readonlyUnsigned = u8()
+        val count = short()
+        require(signers in 1..count && readonlySigned < signers && readonlyUnsigned <= count - signers)
+        val keys = List(count) { bytes(32) }
+        require(keys.toSet().size == count)
+        fun account(i: Int): Account {
+            require(i < count)
+            val writable = if (i < signers) i < signers - readonlySigned else i < count - readonlyUnsigned
+            return Account(keys[i], i < signers, writable)
+        }
+        val blockhash = bytes(32)
+        val instructions = List(short()) {
+            val program = keys[u8().also { require(it < count) }]
+            val accounts = List(short()) { account(u8()) }
+            Instruction(program, accounts, bytes(short()))
+        }
+        require(r == message.size)
+        return Decoded(keys.take(signers), blockhash, instructions)
+    }
+
+    /** Vrai si les deux messages exécutent exactement la même chose, avec le
+     * même payeur et les mêmes signataires. */
+    fun sameMeaning(a: ByteArray, b: ByteArray): Boolean {
+        val x = decode(a); val y = decode(b)
+        return x.signerKeys == y.signerKeys && x.blockhash == y.blockhash && x.instructions == y.instructions
     }
 }

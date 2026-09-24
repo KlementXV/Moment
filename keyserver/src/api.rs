@@ -10,7 +10,7 @@ use axum::{
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use ed25519_dalek::SigningKey;
@@ -229,6 +229,7 @@ pub fn router_with_trusted_proxies(app: Arc<App>, trusted_proxies: Vec<IpNet>) -
         .route("/v1/session/verify", post(verify_session))
         .route("/v1/posts", post(submit))
         .route("/v1/posts/{commitment}/confirm", post(confirm))
+        .route("/v1/posts/{commitment}/like", put(like).delete(unlike))
         .route("/v1/feed", get(feed))
         .route("/v1/blobs/{reference}", get(blob))
         .fallback(|| async { Error::missing() })
@@ -280,6 +281,8 @@ struct VerifyInput {
     nonce: String,
     signature: String,
 }
+const SESSION_TTL_SECONDS: i64 = 30 * 86_400;
+
 async fn verify_session(
     State(app): State<Arc<App>>,
     Json(input): Json<VerifyInput>,
@@ -300,7 +303,9 @@ async fn verify_session(
         &protocol::unbase64(&input.signature, 64)?,
     )?;
     let token = protocol::random_token();
-    let expires = now + 900;
+    // La session fait office de connexion côté app : trop courte, elle ferait
+    // resigner dans le wallet à chaque ouverture.
+    let expires = now + SESSION_TTL_SECONDS;
     app.db
         .consume_nonce(wallet_string, input.nonce, token.clone(), expires, now)
         .await?;
@@ -446,6 +451,8 @@ struct FeedItem {
     blob_ref: String,
     post_key: String,
     blob_url: String,
+    likes: i64,
+    liked: bool,
 }
 impl Drop for FeedItem {
     fn drop(&mut self) {
@@ -489,19 +496,81 @@ async fn feed(
                     blob_url: format!("/v1/blobs/{}", record.blob_ref),
                     blob_ref: record.blob_ref,
                     post_key: protocol::b64(&key),
+                    likes: 0,
+                    liked: false,
                 }))
             }
         })
         .buffered(8)
         .try_collect()
         .await?;
-    let items: Vec<_> = items.into_iter().flatten().collect();
+    let mut items: Vec<_> = items.into_iter().flatten().collect();
+    let likes = app
+        .db
+        .likes(
+            items.iter().map(|i| i.commitment.clone()).collect(),
+            protocol::address_string(&wallet),
+        )
+        .await?;
+    for item in &mut items {
+        if let Some(&(count, mine)) = likes.get(&item.commitment) {
+            item.likes = count;
+            item.liked = mine;
+        }
+    }
     if query.day != app.day() || app.clock.now() >= read_until {
         return Err(Error::forbidden());
     }
     Ok(Json(
         json!({"items":items,"nextCursor":if more {cursor} else {None}}),
     ))
+}
+
+async fn like(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Path(commitment): Path<String>,
+) -> Result<Json<serde_json::Value>> {
+    set_like(app, headers, commitment, true).await
+}
+async fn unlike(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    Path(commitment): Path<String>,
+) -> Result<Json<serde_json::Value>> {
+    set_like(app, headers, commitment, false).await
+}
+/// Same access rule as the feed: only today's members may like today's posts.
+async fn set_like(
+    app: Arc<App>,
+    headers: HeaderMap,
+    commitment: String,
+    liked: bool,
+) -> Result<Json<serde_json::Value>> {
+    let wallet = app.wallet(&headers).await?;
+    protocol::hash_hex(&commitment)?;
+    let post = app
+        .db
+        .get_post(commitment.clone())
+        .await?
+        .filter(|p| p.published && p.day == app.day())
+        .ok_or_else(Error::missing)?;
+    app.reader(wallet, post.day).await?;
+    if !app.matches_chain(&post).await? {
+        return Err(Error::missing());
+    }
+    let me = protocol::address_string(&wallet);
+    app.db
+        .set_like(commitment.clone(), me.clone(), liked, app.clock.now())
+        .await?;
+    let (likes, liked) = app
+        .db
+        .likes(vec![commitment.clone()], me)
+        .await?
+        .get(&commitment)
+        .copied()
+        .unwrap_or((0, false));
+    Ok(Json(json!({"likes": likes, "liked": liked})))
 }
 
 async fn blob(

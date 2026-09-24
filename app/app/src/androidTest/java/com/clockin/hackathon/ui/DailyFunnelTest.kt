@@ -15,21 +15,7 @@ class DailyFunnelTest {
     @get:Rule(order = 0) val compose = createComposeRule()
     @get:Rule(order = 1) val language = FrenchLanguageRule()
 
-    @Test fun publication_hides_navigation_and_next_day_restores_it() {
-        val posted = mutableStateOf(false)
-        compose.setContent {
-            MaterialTheme { DailyNavigation(MomentPage.Home, posted.value, {}, {}) }
-        }
-        compose.onNodeWithText("Accueil").assertIsDisplayed()
-        compose.onNodeWithText("Capturer").assertIsDisplayed()
-        compose.runOnIdle { posted.value = true }
-        compose.onNodeWithText("Accueil").assertDoesNotExist()
-        compose.onNodeWithText("Capturer").assertDoesNotExist()
-        compose.runOnIdle { posted.value = false }
-        compose.onNodeWithText("Capturer").assertIsDisplayed()
-    }
-
-    @Test fun avatar_opens_profile_and_back_restores_home_navigation() {
+    @Test fun avatar_opens_profile_and_back_restores_home() {
         val page = mutableStateOf(MomentPage.Home)
         compose.setContent {
             MaterialTheme {
@@ -40,14 +26,12 @@ class DailyFunnelTest {
                             onClick = { page.value = MomentPage.Home },
                         ) { androidx.compose.material3.Text("Retour au fil") }
                     }
-                    DailyNavigation(page.value, false, {}, {})
                 }
             }
         }
         compose.onNodeWithContentDescription("Voir mon profil").performClick()
-        compose.onNodeWithText("Capturer").assertDoesNotExist()
         compose.onNodeWithText("Retour au fil").performClick()
-        compose.onNodeWithText("Capturer").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Voir mon profil").assertIsDisplayed()
         compose.onNodeWithText("Jour 1").assertDoesNotExist()
     }
 

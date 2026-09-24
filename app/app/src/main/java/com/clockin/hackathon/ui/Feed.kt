@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.FavoriteBorder
@@ -123,7 +124,8 @@ internal fun MomentCard(
     boosted: Boolean = false,
     favorite: Boolean = false,
     likes: Int = 0,
-    comments: Int = 0,
+    liked: Boolean = false,
+    onLike: (() -> Unit)? = null,
     photos: PhotoPair? = null,
     onOptions: (() -> Unit)? = null,
     verifiedRemote: Boolean = false,
@@ -161,8 +163,8 @@ internal fun MomentCard(
         )
         caption?.let { Text(it, style = BodyLg) }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Reaction(Icons.Outlined.FavoriteBorder, likes, tr(Message.Like))
-            Reaction(Icons.Outlined.ChatBubbleOutline, comments, tr(Message.Comments))
+            Reaction(if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, likes, tr(Message.Like),
+                active = liked, onClick = onLike)
             if (self) {
                 Spacer(Modifier.weight(1f))
                 Text(tr(Message.YourMoment), style = BodySm, color = Accent, fontWeight = FontWeight.SemiBold)
@@ -171,19 +173,17 @@ internal fun MomentCard(
     }
 }
 
-/**
- * Les compteurs sont affichés, pas actionnables.
- *
- * Aimer et commenter demandent un dos qui n'existe pas encore ; un bouton qui
- * ne fait rien ment plus qu'un chiffre qui informe.
- */
+/** Compteur de likes ; actionnable seulement quand [onClick] est fourni (Moments réels). */
 @Composable
-private fun Reaction(icon: ImageVector, count: Int, label: String) {
-    Row(Modifier.heightIn(min = 40.dp).padding(end = 8.dp)
+private fun Reaction(icon: ImageVector, count: Int, label: String, active: Boolean = false, onClick: (() -> Unit)? = null) {
+    val tint = if (active) Accent else Muted
+    Row(Modifier.heightIn(min = 40.dp).clip(CircleShape)
+        .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+        .padding(horizontal = 8.dp)
         .clearAndSetSemantics { contentDescription = "$count $label" },
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Icon(icon, contentDescription = null, tint = Muted, modifier = Modifier.size(20.dp))
-        Text("$count", style = BodyMd, color = Muted)
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Text("$count", style = BodyMd, color = tint)
     }
 }
 
@@ -395,6 +395,10 @@ internal fun Feed(
     hasMore: Boolean = false,
     onRefresh: () -> Unit = {},
     onMore: () -> Unit = {},
+    needsSignature: Boolean = false,
+    feedError: String? = null,
+    authorName: (String) -> String? = { null },
+    onLike: (String) -> Unit = {},
 ) {
     var reporting by remember { mutableStateOf<String?>(null) }
     val moments = remember(now / DAY_SECONDS, AppLanguage.code) { demoMoments(Math.floorDiv(now, DAY_SECONDS)) }
@@ -416,7 +420,7 @@ internal fun Feed(
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     moments.take(2).forEach { moment ->
                         MomentCard(moment.name, moment.subtitle, moment.caption, self = false,
-                            variant = moment.variant, likes = 12, comments = 3)
+                            variant = moment.variant, likes = 12)
                     }
                 }
             }
@@ -439,7 +443,7 @@ internal fun Feed(
                 var open by remember(moment.name) { mutableStateOf(false) }
                 Box {
                     MomentCard(moment.name, moment.subtitle, moment.caption, self = false,
-                        variant = moment.variant, likes = 8 + moment.variant * 3, comments = 1 + moment.variant,
+                        variant = moment.variant, likes = 8 + moment.variant * 3,
                         favorite = moment.name in favorites,
                         onOptions = { open = true })
                     MomentOptions(open, moment.name in favorites,
@@ -449,17 +453,17 @@ internal fun Feed(
                 }
             }
         } else {
-            remote.forEach { moment ->
-                MomentCard(moment.wallet.take(6) + "…" + moment.wallet.takeLast(4),
-                    tr(Message.RemoteMomentToday), null, self = false, photos = moment.photos, verifiedRemote = true)
+            if ((needsSignature || feedError != null) && !loading) {
+                InfoCard(tr(Message.ShowTheFeed), feedError ?: tr(Message.FeedSignatureNeeded))
+                PrimaryButton(tr(if (feedError != null) Message.TryAgain else Message.ShowTheFeed), onClick = onRefresh)
             }
-            if (loading) CircularProgressIndicator(color = Accent)
-            TextButton(onClick = onRefresh, enabled = !loading) { Text(tr(Message.RefreshFeed)) }
+            remote.forEach { moment ->
+                MomentCard(authorName(moment.wallet) ?: (moment.wallet.take(6) + "…" + moment.wallet.takeLast(4)),
+                    tr(Message.RemoteMomentToday), moment.caption.ifBlank { null }, self = false,
+                    photos = moment.photos, verifiedRemote = true,
+                    likes = moment.likes, liked = moment.liked, onLike = { onLike(moment.commitment) })
+            }
             if (hasMore) TextButton(onClick = onMore, enabled = !loading) { Text(tr(Message.MoreMoments)) }
-        }
-        if (state.totalCheckIns > 0) {
-            Text(tr(if (state.totalCheckIns == 1L) Message.MomentShared else Message.MomentsShared, state.totalCheckIns), color = Muted, style = BodyMd,
-                modifier = Modifier.clickable(onClick = onProfile).heightIn(min = 48.dp).wrapContentHeight())
         }
     }
 

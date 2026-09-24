@@ -538,6 +538,8 @@ internal fun StakeCard(
     action: String? = null,
     actionEnabled: Boolean = true,
     onAction: () -> Unit = {},
+    secondAction: String? = null,
+    onSecondAction: () -> Unit = {},
 ) {
     MomentCardSurface {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
@@ -552,8 +554,9 @@ internal fun StakeCard(
                 letterSpacing = .56.sp)
         }
         Text(line, style = BodyMd)
-        if (action != null) Box(Modifier.padding(top = 8.dp).offset(x = (-12).dp)) {
-            CardTextButton(action, actionEnabled, onAction)
+        if (action != null || secondAction != null) Row(Modifier.padding(top = 8.dp).offset(x = (-12).dp)) {
+            if (secondAction != null) CardTextButton(secondAction, actionEnabled, onSecondAction)
+            if (action != null) CardTextButton(action, actionEnabled, onAction)
         }
     }
 }

@@ -86,9 +86,9 @@ const [adminTokenAccount] = PublicKey.findProgramAddressSync(
 
 /** Paramètres de travail de la feuille de route (§6 de la spec). */
 const params = Buffer.concat([
-  u64(10n * SKR), // min_stake
+  u64(500n * SKR), // min_stake
   u64(1n * SKR), // reward_cap
-  u64(100n * SKR), // faucet_amount
+  u64(1000n * SKR), // faucet_amount
   i64(172_800n), // withdrawal_delay_seconds : 48 h
   u16(100), // reward_rate_bps : 1 %/jour
   u16(2500), // decay_bps : 25 % par jour manqué

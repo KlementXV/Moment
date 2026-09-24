@@ -8,6 +8,10 @@ import com.solana.mobilewalletadapter.clientlib.ActivityResultSender
 import com.solana.mobilewalletadapter.clientlib.MobileWalletAdapter
 import com.solana.mobilewalletadapter.clientlib.TransactionResult
 import com.solana.publickey.SolanaPublicKey
+import android.content.SharedPreferences
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 
 enum class WalletFailure {
@@ -30,16 +34,36 @@ class WalletException(val failure: WalletFailure) : Exception(failure.message)
  *
  * Rien de ce qui passe ici n'est journalisé : ni manifeste, ni transaction,
  * ni signature.
+ *
+ * L'adresse et le jeton d'autorisation MWA sont conservés dans [store] : un
+ * wallet connecté le reste d'un lancement à l'autre (et à travers une
+ * recréation de l'activité), sans redemander l'autorisation au wallet.
  */
 class WalletSession(
     private val adapter: MobileWalletAdapter,
     private val sender: ActivityResultSender,
+    private val store: SharedPreferences,
 ) {
-    var address: SolanaPublicKey? = null
+    var address: SolanaPublicKey? by mutableStateOf(null)
         private set
+
+    init {
+        adapter.authToken = store.getString(KEY_AUTH_TOKEN, null)
+        address = store.getString(KEY_ADDRESS, null)?.let { runCatching { SolanaPublicKey.from(it) }.getOrNull() }
+    }
 
     fun forget() {
         address = null
+        adapter.authToken = null
+        store.edit().remove(KEY_ADDRESS).remove(KEY_AUTH_TOKEN).apply()
+    }
+
+    /** Le jeton MWA peut être renouvelé à chaque échange : on garde le dernier. */
+    private fun persist() {
+        store.edit()
+            .putString(KEY_ADDRESS, address?.base58())
+            .putString(KEY_AUTH_TOKEN, adapter.authToken)
+            .apply()
     }
 
     suspend fun connect(): Result<SolanaPublicKey> = try {
@@ -51,6 +75,7 @@ class WalletSession(
                 } else {
                     val key = SolanaPublicKey(account.publicKey)
                     address = key
+                    persist()
                     Result.success(key)
                 }
             }
@@ -93,7 +118,7 @@ class WalletSession(
 
     private suspend fun <T> wrap(block: suspend () -> TransactionResult<T>): Result<T> = try {
         when (val result = block()) {
-            is TransactionResult.Success -> Result.success(result.payload)
+            is TransactionResult.Success -> { persist(); Result.success(result.payload) }
             is TransactionResult.NoWalletFound ->
                 Result.failure(WalletException(WalletFailure.NoWallet))
             is TransactionResult.Failure ->
@@ -105,5 +130,10 @@ class WalletSession(
         Result.failure(failure)
     } catch (_: Exception) {
         Result.failure(WalletException(WalletFailure.Unexpected))
+    }
+
+    private companion object {
+        const val KEY_ADDRESS = "address"
+        const val KEY_AUTH_TOKEN = "authToken"
     }
 }

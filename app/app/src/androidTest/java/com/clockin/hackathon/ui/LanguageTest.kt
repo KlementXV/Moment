@@ -54,7 +54,7 @@ class LanguageTest {
                         favorites = emptySet(), onToggleFavorite = {}, onRetrySkr = {},
                         onNicknameChange = {}, onConnect = {}, onDisconnect = {},
                         onFaucet = {}, onStake = {}, onExit = {}, onCancel = {}, onWithdraw = {},
-                        demoFeed = false, onDemoFeedChange = {})
+                        demoFeed = false)
                 }
             }
         }

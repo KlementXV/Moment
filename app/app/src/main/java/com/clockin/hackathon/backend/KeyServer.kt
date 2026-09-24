@@ -9,7 +9,7 @@ import java.net.URLEncoder
 import java.util.Base64
 
 class BackendException(val status: Int, message: String) : Exception(message)
-data class FeedItem(val wallet: String, val commitment: String, val blobRef: String, val postKey: String)
+data class FeedItem(val wallet: String, val commitment: String, val blobRef: String, val postKey: String, val likes: Int = 0, val liked: Boolean = false)
 data class FeedPage(val items: List<FeedItem>, val next: String?)
 fun b64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 fun unb64(text: String): ByteArray = Base64.getDecoder().decode(text)
@@ -26,13 +26,13 @@ class KeyServer(baseUrl: String, allowLocalHttp: Boolean = false) {
         val port = if (uri.port == -1 || (uri.scheme == "https" && uri.port == 443) || (uri.scheme == "http" && uri.port == 80)) "" else ":${uri.port}"
         origin = "${uri.scheme}://${uri.host.lowercase()}$port"
     }
-    private suspend fun request(path: String, token: String?, body: JsonObject? = null): ByteArray = withContext(Dispatchers.IO) {
+    private suspend fun request(path: String, token: String?, body: JsonObject? = null, method: String? = null): ByteArray = withContext(Dispatchers.IO) {
         val connection = URI(origin + path).toURL().openConnection() as HttpURLConnection
         try {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 15_000
             connection.readTimeout = 60_000
-            connection.requestMethod = if (body == null) "GET" else "POST"
+            connection.requestMethod = method ?: if (body == null) "GET" else "POST"
             token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             body?.let {
                 connection.setRequestProperty("Content-Type", "application/json")
@@ -54,7 +54,7 @@ class KeyServer(baseUrl: String, allowLocalHttp: Boolean = false) {
             require(bytes.size <= PostPacket.MAX_BLOB)
             if (status !in 200..299) throw BackendException(status, when (status) {
                 401 -> "Session expirée. Réessayez pour signer une nouvelle connexion."
-                403 -> "Accès refusé. Vérifiez votre publication et votre mise du jour."
+                403 -> "Accès refusé. Vérifiez votre publication et votre staking du jour."
                 409 -> "Une publication existe déjà pour ce jour. Reprenez sa confirmation."
                 422 -> "Le serveur a refusé les photos ou la publication."
                 429 -> "Trop de demandes. Réessayez dans une minute."
@@ -86,8 +86,16 @@ class KeyServer(baseUrl: String, allowLocalHttp: Boolean = false) {
         val result = json("/v1/feed?day=$day&limit=10$query", token)
         return FeedPage(result.getValue("items").jsonArray.map { item ->
             val o = item.jsonObject
-            FeedItem(o.string("wallet"), o.string("commitment"), o.string("blobRef"), o.string("postKey"))
+            FeedItem(o.string("wallet"), o.string("commitment"), o.string("blobRef"), o.string("postKey"),
+                o["likes"]?.jsonPrimitive?.content?.toInt() ?: 0, o["liked"]?.jsonPrimitive?.content == "true")
         }, result["nextCursor"]?.jsonPrimitive?.contentOrNull)
+    }
+    /** Returns the post's like count and whether this wallet likes it. */
+    suspend fun like(commitment: String, liked: Boolean, token: String): Pair<Int, Boolean> {
+        require(commitment.matches(Regex("[0-9a-f]{64}")))
+        val result = Json.parseToJsonElement(request("/v1/posts/$commitment/like", token,
+            method = if (liked) "PUT" else "DELETE").toString(Charsets.UTF_8)).jsonObject
+        return result.string("likes").toInt() to (result.string("liked") == "true")
     }
     suspend fun blob(ref: String, token: String): ByteArray {
         require(ref.matches(Regex("[0-9a-f]{64}")))

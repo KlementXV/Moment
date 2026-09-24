@@ -73,7 +73,6 @@ class DemoFeedScreenTest {
                                     minimumHeight = (viewportHeight - 52.dp).coerceAtLeast(0.dp))
                             }
                         }
-                        DailyNavigation(MomentPage.Home, state.posted, {}, {})
                     }
                 }
             }
@@ -112,20 +111,6 @@ class DemoFeedScreenTest {
         feed(ChainState(day = today, loaded = true), demo = false)
         compose.onNodeWithText("Ton moment ouvre le fil").assertIsDisplayed()
         screenshot("03-home-locked")
-    }
-
-    @Test fun the_profile_switch_reports_both_directions() {
-        val enabled = mutableStateOf(false)
-        val seen = mutableListOf<Boolean>()
-        compose.setContent {
-            MaterialTheme(colorScheme = darkColorScheme(background = Ink, surface = Panel, onSurface = White)) {
-                Surface { DemoSection(enabled.value) { seen += it; enabled.value = it } }
-            }
-        }
-        compose.onNodeWithText("Afficher de faux Moments").assertIsDisplayed()
-        compose.onNode(isToggleable()).assertIsOff().performClick()
-        compose.onNode(isToggleable()).assertIsOn().performClick()
-        compose.runOnIdle { assertEquals(listOf(true, false), seen) }
     }
 
     /** Sous le verrou, rien du fil ne doit être lisible — ni à l'œil, ni au lecteur d'écran. */

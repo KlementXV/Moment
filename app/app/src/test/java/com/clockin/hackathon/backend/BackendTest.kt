@@ -30,14 +30,15 @@ class BackendTest {
         val post = SealedPost(fixture.string("day").toLong(), fixture.string("commitment"), fixture.string("blobRef"),
             unb64(fixture.string("postKey")), unb64(fixture.string("blob")))
         val decoded = PostPacket.open(post, unb64(fixture.string("wallet")), fixture.string("network"), unb64(fixture.string("program")))
-        assertArrayEquals(unb64(fixture.string("rear")), decoded.rear)
-        assertArrayEquals(unb64(fixture.string("front")), decoded.front)
+        assertArrayEquals(unb64(fixture.string("rear")), decoded.photos.rear)
+        assertArrayEquals(unb64(fixture.string("front")), decoded.photos.front)
         val authority = Ed25519PrivateKeyParameters(ByteArray(32) { 8 }, 0).generatePublicKey().encoded
         fun hexBytes(value: String) = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         val tx = TransactionBuilder.build(listOf(ClockInInstructions.checkIn(SolanaPublicKey(program), SolanaPublicKey(wallet),
             SolanaPublicKey(authority), post.day, hexBytes(post.commitment), hexBytes(post.blobRef))), SolanaPublicKey(wallet), Base58.encode(ByteArray(32) { 9 }))
+        java.io.File("build/android-transaction.txt").writeText(java.util.Base64.getEncoder().encodeToString(tx.serialize()))
         assertArrayEquals(unb64(fixture.string("transaction")), tx.serialize())
-        assertArrayEquals(byteArrayOf(2, 1, 2), tx.message.serialize().copyOfRange(0, 3))
+        assertArrayEquals(byteArrayOf(2, 1, 3), tx.message.serialize().copyOfRange(0, 3))
     }
     @Test fun encryptedPendingPostSurvivesRestartWithoutChangingReferences() {
         val original = packet()
@@ -48,7 +49,7 @@ class BackendTest {
         assertEquals(original.blobRef, restored.blobRef)
         assertArrayEquals(original.key, restored.key)
         assertArrayEquals(original.blob, restored.blob)
-        assertArrayEquals(photos.front, PostPacket.open(restored, wallet, "devnet", program).front)
+        assertArrayEquals(photos.front, PostPacket.open(restored, wallet, "devnet", program).photos.front)
         val clear = PendingPostCodec.encode(original)
         assertThrows(Exception::class.java) { PendingPostCodec.decode(original.day + 1, clear) }
         assertThrows(Exception::class.java) { PendingPostCodec.decode(original.day, clear + byteArrayOf(0)) }
@@ -59,7 +60,7 @@ class BackendTest {
 
     @Test fun packetRoundtripAndTampering() {
         val post = packet()
-        assertArrayEquals(photos.rear, PostPacket.open(post, wallet, "devnet", program).rear)
+        assertArrayEquals(photos.rear, PostPacket.open(post, wallet, "devnet", program).photos.rear)
         fun rejects(p: SealedPost = post, w: ByteArray = wallet, network: String = "devnet", id: ByteArray = program) {
             assertThrows(Exception::class.java) { PostPacket.open(p, w, network, id) }
         }
@@ -150,7 +151,7 @@ class BackendTest {
                     "/v1/posts" -> {
                         val request = Json.parseToJsonElement(body.toString(Charsets.UTF_8)).jsonObject
                         assertArrayEquals(post.blob, unb64(request.string("blob")))
-                        assertArrayEquals(photos.front, PostPacket.open(post, wallet, "devnet", program).front)
+                        assertArrayEquals(photos.front, PostPacket.open(post, wallet, "devnet", program).photos.front)
                         """{"state":"authorized","commitment":"${post.commitment}","blobRef":"${post.blobRef}","transaction":"AQID"}""".toByteArray()
                     }
                     "/v1/posts/${post.commitment}/confirm" -> """{"state":"published"}""".toByteArray()
@@ -172,7 +173,7 @@ class BackendTest {
             val page = api.feed(post.day, null, token)
             assertEquals("cursor+next", page.next)
             val blob = api.blob(page.items.single().blobRef, token)
-            assertArrayEquals(photos.rear, PostPacket.open(post.copy(blob = blob), wallet, "devnet", program).rear)
+            assertArrayEquals(photos.rear, PostPacket.open(post.copy(blob = blob), wallet, "devnet", program).photos.rear)
             assertEquals(6, calls.size)
         } finally { server.stop(0) }
     }

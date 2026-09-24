@@ -330,6 +330,53 @@ impl Db {
         .map(row)
         .collect()
     }
+    pub async fn set_like(
+        &self,
+        commitment: String,
+        wallet: String,
+        liked: bool,
+        now: i64,
+    ) -> Result<()> {
+        let query = if liked {
+            sqlx::query("INSERT INTO likes (commitment,wallet,created) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING")
+                .bind(commitment)
+                .bind(wallet)
+                .bind(now)
+        } else {
+            sqlx::query("DELETE FROM likes WHERE commitment=$1 AND wallet=$2")
+                .bind(commitment)
+                .bind(wallet)
+        };
+        query.execute(&self.pool).await.map_err(db_error)?;
+        Ok(())
+    }
+    /// Like count and whether `wallet` liked, for each requested post.
+    pub async fn likes(
+        &self,
+        commitments: Vec<String>,
+        wallet: String,
+    ) -> Result<std::collections::HashMap<String, (i64, bool)>> {
+        sqlx::query(
+            "SELECT commitment, COUNT(*) AS n, BOOL_OR(wallet=$2) AS mine FROM likes
+            WHERE commitment = ANY($1) GROUP BY commitment",
+        )
+        .bind(commitments)
+        .bind(wallet)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_error)?
+        .into_iter()
+        .map(|r| {
+            Ok((
+                r.try_get("commitment").map_err(db_error)?,
+                (
+                    r.try_get("n").map_err(db_error)?,
+                    r.try_get("mine").map_err(db_error)?,
+                ),
+            ))
+        })
+        .collect()
+    }
     pub async fn post_key(&self, post: Post) -> Result<Zeroizing<Vec<u8>>> {
         let wrapped: Vec<u8> =
             sqlx::query_scalar("SELECT wrapped_key FROM posts WHERE commitment=$1")
@@ -517,7 +564,7 @@ mod tests {
             .fetch_one(&first.pool)
             .await
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count as usize, MIGRATOR.iter().count());
         let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM metadata")
             .fetch_one(&first.pool)
             .await

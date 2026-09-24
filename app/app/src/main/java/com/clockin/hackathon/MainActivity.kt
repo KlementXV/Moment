@@ -32,7 +32,8 @@ class MainActivity : ComponentActivity() {
         val model = ViewModelProvider(this)[ClockInModel::class.java]
         // La session wallet a besoin de l'activité : elle est fournie ici plutôt
         // que construite dans le ViewModel.
-        model.wallet = WalletSession(adapter, sender)
+        model.wallet = WalletSession(adapter, sender,
+            getSharedPreferences("wallet", MODE_PRIVATE))
         setContent { MomentApp(model) }
     }
 }

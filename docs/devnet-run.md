@@ -66,7 +66,7 @@ adb shell am start -n com.clockin.hackathon/.MainActivity
 l'écran de verrouillage, mais elle ne s'affiche pas et les captures ne montrent
 que le verrou.
 
-Parcours : connecter le wallet → **Moi** → recevoir 100 SKR → miser 50 SKR →
+Parcours : connecter le wallet → **Moi** → recevoir 1000 SKR → staker 500 SKR →
 **Capturer** → scène puis selfie → publier. Le wallet demande deux signatures :
 d'abord le manifeste (signature détachée), puis la transaction `check_in`.
 
