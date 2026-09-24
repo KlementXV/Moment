@@ -14,6 +14,8 @@ pub struct Config {
     pub min_stake: u64,
     pub decay_bps: u16,
     pub max_decay_days: u8,
+    /// Seconds after the end of day D before its pool closes (daily pool spec).
+    pub pool_close_delay: i64,
 }
 #[derive(Clone, Debug)]
 pub struct Profile {
@@ -22,23 +24,77 @@ pub struct Profile {
     pub settled_day: i64,
     pub exit_unlock_at: i64,
     pub active: bool,
+    /// Claims on the pools of published days, `-1` for a free slot.
+    pub pending_days: [i64; 2],
+    pub pending_stakes: [u64; 2],
+}
+#[derive(Clone, Debug)]
+pub struct DayPool {
+    pub day: i64,
+    pub penalties: u64,
+    pub total_stake: u64,
+}
+pub const DAY: i64 = 86_400;
+pub fn closes_at(day: i64, delay: i64) -> i64 {
+    day.saturating_add(1).saturating_mul(DAY).saturating_add(delay)
+}
+/// Same formula as the program: pro rata, rounded down, never above the pool.
+pub fn share(penalties: u64, stake: u64, total_stake: u64) -> u64 {
+    if total_stake == 0 {
+        return 0;
+    }
+    (penalties as u128 * stake as u128 / total_stake as u128).min(penalties as u128) as u64
 }
 impl Profile {
-    pub fn eligible(&self, config: &Config, now: i64) -> bool {
+    pub fn settle_bound(&self, today: i64) -> i64 {
+        let yesterday = today.saturating_sub(1);
+        if self.exit_unlock_at > 0 {
+            yesterday.min(self.exit_unlock_at.div_euclid(DAY) - 1)
+        } else {
+            yesterday
+        }
+    }
+    /// Claims whose pool is closed, as `(day, stake)`.
+    pub fn closed_claims(&self, config: &Config, now: i64) -> Vec<(i64, u64)> {
+        (0..2)
+            .filter(|&i| {
+                self.pending_days[i] >= 0
+                    && now >= closes_at(self.pending_days[i], config.pool_close_delay)
+            })
+            .map(|i| (self.pending_days[i], self.pending_stakes[i]))
+            .collect()
+    }
+    /// Pools a settling instruction must carry, as `(day, writable)`: closed
+    /// claims (read) and the last missed day while its pool is open (written).
+    pub fn settlement_pools(&self, config: &Config, now: i64, bound: i64) -> Vec<(i64, bool)> {
+        let mut pools: Vec<(i64, bool)> = self
+            .closed_claims(config, now)
+            .into_iter()
+            .map(|(day, _)| (day, false))
+            .collect();
+        if self.active && bound > self.settled_day && now < closes_at(bound, config.pool_close_delay)
+        {
+            pools.push((bound, true));
+        }
+        pools
+    }
+    /// A late day to settle or a closed claim to pay out: `reap` would succeed.
+    pub fn needs_reap(&self, config: &Config, now: i64) -> bool {
+        self.active
+            && (self.settle_bound(now.div_euclid(DAY)) > self.settled_day
+                || !self.closed_claims(config, now).is_empty())
+    }
+    /// `gains` are the closed claims, credited by the program before the decay.
+    pub fn eligible(&self, config: &Config, now: i64, gains: u64) -> bool {
         if !self.active
             || config.decay_bps > 10_000
             || (self.exit_unlock_at > 0 && now >= self.exit_unlock_at)
         {
             return false;
         }
-        let yesterday = now.div_euclid(86_400) - 1;
-        let bound = if self.exit_unlock_at > 0 {
-            yesterday.min(self.exit_unlock_at.div_euclid(86_400) - 1)
-        } else {
-            yesterday
-        };
+        let bound = self.settle_bound(now.div_euclid(DAY));
         let missed = bound.saturating_sub(self.settled_day).max(0);
-        let mut remaining = self.staked as u128;
+        let mut remaining = self.staked as u128 + gains as u128;
         if missed > config.max_decay_days as i64 {
             remaining = 0;
         } else {
@@ -60,14 +116,15 @@ pub struct CheckIn {
 pub trait Chain: Send + Sync {
     async fn config(&self) -> Result<Config>;
     async fn profile(&self, wallet: Key) -> Result<Option<Profile>>;
+    async fn day_pool(&self, day: i64) -> Result<Option<DayPool>>;
     async fn check_in(&self, wallet: Key, day: i64) -> Result<Option<CheckIn>>;
     async fn blockhash_valid(&self, hash: Key) -> Result<bool>;
 }
-fn pda(program: &Key, seeds: &[&[u8]]) -> (Key, u8) {
+pub(crate) fn pda(program: &Key, seeds: &[&[u8]]) -> (Key, u8) {
     let (key, bump) = Pubkey::find_program_address(seeds, &Pubkey::new_from_array(*program));
     (key.to_bytes(), bump)
 }
-fn discriminator(name: &str) -> [u8; 8] {
+pub(crate) fn discriminator(name: &str) -> [u8; 8] {
     protocol::hash(name.as_bytes())[..8].try_into().unwrap()
 }
 fn invalid() -> Error {
@@ -360,56 +417,36 @@ impl Chain for RpcChain {
     async fn config(&self) -> Result<Config> {
         let (address, bump) = pda(&self.program, &[b"config"]);
         let bytes = self
-            .account(address, "account:Config", 184)
+            .account(address, "account:Config", CONFIG_LEN)
             .await?
             .ok_or_else(Error::unavailable)?;
-        let mut r = Reader::new(&bytes);
-        r.take(40)?;
-        let authority = r.array()?;
-        r.take(72)?;
-        let min_stake = r.u64()?;
-        r.take(26)?;
-        let decay_bps = r.u16()?;
-        let max_decay_days = r.u8()?;
-        let faucet = r.u8()?;
-        let stored_bump = r.u8()?;
-        r.u8()?;
-        if decay_bps > 10_000 || faucet > 1 || stored_bump != bump || !r.done() {
+        let (config, stored_bump) = decode_config(&bytes)?;
+        if stored_bump != bump {
             return Err(Error::unavailable());
         }
-        Ok(Config {
-            authority,
-            min_stake,
-            decay_bps,
-            max_decay_days,
-        })
+        Ok(config)
     }
     async fn profile(&self, wallet: Key) -> Result<Option<Profile>> {
         let (address, bump) = pda(&self.program, &[b"profile", &wallet]);
-        let Some(bytes) = self.account(address, "account:Profile", 95).await? else {
+        let Some(bytes) = self.account(address, "account:Profile", PROFILE_LEN).await? else {
             return Ok(None);
         };
-        let mut r = Reader::new(&bytes);
-        r.take(8)?;
-        let owner = r.array()?;
-        let staked = r.u64()?;
-        let settled_day = r.i64()?;
-        r.take(16)?;
-        let exit_unlock_at = r.i64()?;
-        r.take(12)?;
-        let active = r.u8()?;
-        let faucet = r.u8()?;
-        let stored_bump = r.u8()?;
-        if owner != wallet || active > 1 || faucet > 1 || stored_bump != bump || !r.done() {
+        let (profile, stored_bump) = decode_profile(&bytes)?;
+        if profile.owner != wallet || stored_bump != bump {
             return Err(Error::unavailable());
         }
-        Ok(Some(Profile {
-            owner,
-            staked,
-            settled_day,
-            exit_unlock_at,
-            active: active == 1,
-        }))
+        Ok(Some(profile))
+    }
+    async fn day_pool(&self, day: i64) -> Result<Option<DayPool>> {
+        let (address, bump) = pda(&self.program, &[b"day_pool", &day.to_le_bytes()]);
+        let Some(bytes) = self.account(address, "account:DayPool", DAY_POOL_LEN).await? else {
+            return Ok(None);
+        };
+        let (pool, stored_bump) = decode_day_pool(&bytes)?;
+        if pool.day != day || stored_bump != bump {
+            return Err(Error::unavailable());
+        }
+        Ok(Some(pool))
     }
     async fn check_in(&self, wallet: Key, day: i64) -> Result<Option<CheckIn>> {
         let address = pda(&self.program, &[b"checkin", &wallet, &day.to_le_bytes()]).0;
@@ -443,6 +480,90 @@ impl Chain for RpcChain {
         .and_then(Value::as_bool)
         .ok_or_else(Error::unavailable)
     }
+}
+
+pub const CONFIG_LEN: usize = 174;
+pub const PROFILE_LEN: usize = 127;
+pub const DAY_POOL_LEN: usize = 37;
+/// Anchor layout of `Config`; returns the stored bump, which callers check.
+pub fn decode_config(bytes: &[u8]) -> Result<(Config, u8)> {
+    if bytes.len() != CONFIG_LEN || bytes[..8] != discriminator("account:Config") {
+        return Err(Error::unavailable());
+    }
+    let mut r = Reader::new(bytes);
+    r.take(40)?;
+    let authority = r.array()?;
+    r.take(64)?;
+    let min_stake = r.u64()?;
+    r.take(16)?;
+    let pool_close_delay = r.i64()?;
+    let decay_bps = r.u16()?;
+    let max_decay_days = r.u8()?;
+    let faucet = r.u8()?;
+    let bump = r.u8()?;
+    r.u8()?;
+    if decay_bps > 10_000 || faucet > 1 || !(0..DAY).contains(&pool_close_delay) || !r.done() {
+        return Err(Error::unavailable());
+    }
+    Ok((
+        Config {
+            authority,
+            min_stake,
+            decay_bps,
+            max_decay_days,
+            pool_close_delay,
+        },
+        bump,
+    ))
+}
+pub fn decode_profile(bytes: &[u8]) -> Result<(Profile, u8)> {
+    if bytes.len() != PROFILE_LEN || bytes[..8] != discriminator("account:Profile") {
+        return Err(Error::unavailable());
+    }
+    let mut r = Reader::new(bytes);
+    r.take(8)?;
+    let owner = r.array()?;
+    let staked = r.u64()?;
+    let settled_day = r.i64()?;
+    r.take(16)?;
+    let exit_unlock_at = r.i64()?;
+    r.take(12)?;
+    let active = r.u8()?;
+    let faucet = r.u8()?;
+    let bump = r.u8()?;
+    let pending_days = [r.i64()?, r.i64()?];
+    let pending_stakes = [r.u64()?, r.u64()?];
+    if active > 1 || faucet > 1 || !r.done() {
+        return Err(Error::unavailable());
+    }
+    Ok((
+        Profile {
+            owner,
+            staked,
+            settled_day,
+            exit_unlock_at,
+            active: active == 1,
+            pending_days,
+            pending_stakes,
+        },
+        bump,
+    ))
+}
+pub fn decode_day_pool(bytes: &[u8]) -> Result<(DayPool, u8)> {
+    if bytes.len() != DAY_POOL_LEN || bytes[..8] != discriminator("account:DayPool") {
+        return Err(Error::unavailable());
+    }
+    let mut r = Reader::new(bytes);
+    r.take(8)?;
+    let day = r.i64()?;
+    let penalties = r.u64()?;
+    let total_stake = r.u64()?;
+    r.take(4)?;
+    let bump = r.u8()?;
+    if !r.done() {
+        return Err(Error::unavailable());
+    }
+    Ok((DayPool { day, penalties, total_stake }, bump))
 }
 
 #[cfg(test)]
@@ -566,6 +687,98 @@ mod tests {
         writable_system[131] = 2; // system program would become writable
         assert!(validate_transaction(&writable_system, &e).is_err());
     }
+    fn layout(name: &str) -> Vec<u8> {
+        let text = include_str!("../tests/fixtures/account-layouts-v2.hex");
+        let prefix = format!("{name}=");
+        let line = text.lines().find(|l| l.starts_with(&prefix)).unwrap();
+        hex::decode(&line[prefix.len()..]).unwrap()
+    }
+    #[test]
+    fn decoders_match_the_program_layouts() {
+        let (config, bump) = decode_config(&layout("config")).unwrap();
+        assert_eq!(config.authority, [2; 32]);
+        assert_eq!(config.min_stake, 500_000_000_000);
+        assert_eq!(config.pool_close_delay, 21_600);
+        assert_eq!((config.decay_bps, config.max_decay_days, bump), (1000, 30, 254));
+        let (profile, bump) = decode_profile(&layout("profile")).unwrap();
+        assert_eq!(profile.owner, [5; 32]);
+        assert_eq!(profile.staked, 123_000_000_000);
+        assert_eq!(profile.pending_days, [20_717, 20_718]);
+        assert_eq!(profile.pending_stakes, [100_000_000_000, 110_000_000_000]);
+        assert!(profile.active);
+        assert_eq!(bump, 252);
+        let (pool, bump) = decode_day_pool(&layout("day_pool")).unwrap();
+        assert_eq!(
+            (pool.day, pool.penalties, pool.total_stake, bump),
+            (20_718, 30_000_000_000, 600_000_000_000, 251)
+        );
+    }
+    fn pool_config() -> Config {
+        Config {
+            authority: [0; 32],
+            min_stake: 100,
+            decay_bps: 1000,
+            max_decay_days: 30,
+            pool_close_delay: 21_600,
+        }
+    }
+    fn pool_profile() -> Profile {
+        Profile {
+            owner: [1; 32],
+            staked: 1_000,
+            settled_day: 99,
+            exit_unlock_at: 0,
+            active: true,
+            pending_days: [98, 99],
+            pending_stakes: [1_000, 1_000],
+        }
+    }
+    #[test]
+    fn claims_close_the_next_morning() {
+        let p = pool_profile();
+        let c = pool_config();
+        assert_eq!(p.closed_claims(&c, closes_at(98, 21_600) - 1), vec![]);
+        assert_eq!(p.closed_claims(&c, closes_at(99, 21_600) - 1), vec![(98, 1_000)]);
+        assert_eq!(
+            p.closed_claims(&c, closes_at(99, 21_600)),
+            vec![(98, 1_000), (99, 1_000)]
+        );
+    }
+    #[test]
+    fn settlement_pools_follow_the_program_rule() {
+        let c = pool_config();
+        let mut p = pool_profile();
+        // Published on 98, absent on 99.
+        p.settled_day = 98;
+        p.pending_days = [98, -1];
+        // Day 100 at 03:00: 98 closed (read), 99 missed and still open (written).
+        let now = 100 * 86_400 + 3 * 3_600;
+        assert_eq!(p.settlement_pools(&c, now, 99), vec![(98, false), (99, true)]);
+        // After 06:00 the pool of 99 is closed and no longer passed.
+        let now = 100 * 86_400 + 7 * 3_600;
+        assert_eq!(p.settlement_pools(&c, now, 99), vec![(98, false)]);
+    }
+    #[test]
+    fn needs_reap_when_late_or_when_a_claim_closed() {
+        let c = pool_config();
+        let mut p = pool_profile();
+        p.pending_days = [-1, 99];
+        assert!(!p.needs_reap(&c, 100 * 86_400 + 60));
+        assert!(p.needs_reap(&c, 100 * 86_400 + 6 * 3_600 + 60));
+        p.pending_days = [-1, -1];
+        assert!(p.needs_reap(&c, 101 * 86_400 + 60), "day 100 missed");
+        p.active = false;
+        assert!(!p.needs_reap(&c, 101 * 86_400 + 60));
+    }
+    #[test]
+    fn closed_gains_count_towards_eligibility() {
+        let c = pool_config();
+        let mut p = pool_profile();
+        p.staked = 95;
+        let now = 100 * 86_400;
+        assert!(!p.eligible(&c, now, 0));
+        assert!(p.eligible(&c, now, 5));
+    }
     #[test]
     fn eligibility_matches_compounding_decay_and_unlock_boundary() {
         let config = Config {
@@ -573,6 +786,7 @@ mod tests {
             min_stake: 56,
             decay_bps: 2500,
             max_decay_days: 30,
+            pool_close_delay: 21_600,
         };
         let mut p = Profile {
             owner: [0; 32],
@@ -580,20 +794,22 @@ mod tests {
             settled_day: 97,
             exit_unlock_at: 0,
             active: true,
+            pending_days: [-1, -1],
+            pending_stakes: [0, 0],
         };
-        assert!(p.eligible(&config, 100 * 86_400)); // floor(75 * .75) = 56
+        assert!(p.eligible(&config, 100 * 86_400, 0)); // floor(75 * .75) = 56
         p.staked = 99;
-        assert!(!p.eligible(&config, 100 * 86_400));
+        assert!(!p.eligible(&config, 100 * 86_400, 0));
         p.staked = 100;
         p.exit_unlock_at = 100 * 86_400 + 500;
-        assert!(p.eligible(&config, p.exit_unlock_at - 1));
-        assert!(!p.eligible(&config, p.exit_unlock_at));
+        assert!(p.eligible(&config, p.exit_unlock_at - 1, 0));
+        assert!(!p.eligible(&config, p.exit_unlock_at, 0));
         p.exit_unlock_at = 0;
         p.settled_day = 68;
-        assert!(!p.eligible(&config, 100 * 86_400));
+        assert!(!p.eligible(&config, 100 * 86_400, 0));
         p.settled_day = 100;
         p.active = false;
-        assert!(!p.eligible(&config, 100 * 86_400));
+        assert!(!p.eligible(&config, 100 * 86_400, 0));
     }
     #[tokio::test]
     async fn rpc_decodes_anchor_layouts_and_rejects_wrong_owner() {
@@ -604,14 +820,15 @@ mod tests {
         let (cfg_key, cfg_bump) = pda(&program, &[b"config"]);
         let (profile_key, profile_bump) = pda(&program, &[b"profile", &wallet]);
         let check_key = pda(&program, &[b"checkin", &wallet, &day.to_le_bytes()]).0;
-        let mut cfg = vec![0u8; 184];
+        let mut cfg = vec![0u8; 174];
         cfg[..8].copy_from_slice(&discriminator("account:Config"));
         cfg[40..72].fill(7);
-        cfg[144..152].copy_from_slice(&123u64.to_le_bytes());
-        cfg[178..180].copy_from_slice(&2500u16.to_le_bytes());
-        cfg[180] = 30;
-        cfg[182] = cfg_bump;
-        let mut profile = vec![0u8; 95];
+        cfg[136..144].copy_from_slice(&123u64.to_le_bytes());
+        cfg[160..168].copy_from_slice(&21_600i64.to_le_bytes());
+        cfg[168..170].copy_from_slice(&2500u16.to_le_bytes());
+        cfg[170] = 30;
+        cfg[172] = cfg_bump;
+        let mut profile = vec![0u8; 127];
         profile[..8].copy_from_slice(&discriminator("account:Profile"));
         profile[8..40].copy_from_slice(&wallet);
         profile[40..48].copy_from_slice(&456u64.to_le_bytes());
@@ -619,6 +836,9 @@ mod tests {
         profile[72..80].copy_from_slice(&123456i64.to_le_bytes());
         profile[92] = 1;
         profile[94] = profile_bump;
+        profile[95..103].copy_from_slice(&(day - 1).to_le_bytes());
+        profile[103..111].copy_from_slice(&(-1i64).to_le_bytes());
+        profile[111..119].copy_from_slice(&456u64.to_le_bytes());
         let mut check = vec![0u8; 124];
         check[..8].copy_from_slice(&discriminator("account:CheckIn"));
         check[8..40].copy_from_slice(&wallet);
@@ -644,7 +864,10 @@ mod tests {
         assert_eq!(config.authority, [7; 32]);
         assert_eq!(config.min_stake, 123);
         assert_eq!(config.decay_bps, 2500);
+        assert_eq!(config.pool_close_delay, 21_600);
         let profile = chain.profile(wallet).await.unwrap().unwrap();
+        assert_eq!(profile.pending_days, [day - 1, -1]);
+        assert_eq!(profile.pending_stakes, [456, 0]);
         assert_eq!(profile.staked, 456);
         assert_eq!(profile.settled_day, day - 1);
         assert_eq!(profile.exit_unlock_at, 123456);
@@ -734,6 +957,7 @@ mod tests {
             min_stake: 1,
             decay_bps: 10_000,
             max_decay_days: 255,
+            pool_close_delay: 21_600,
         };
         let mut profile = Profile {
             owner: [0; 32],
@@ -741,12 +965,14 @@ mod tests {
             settled_day: i64::MIN,
             exit_unlock_at: 0,
             active: true,
+            pending_days: [-1, -1],
+            pending_stakes: [0, 0],
         };
-        assert!(!profile.eligible(&config, i64::MAX));
-        assert!(!profile.eligible(&config, i64::MIN));
+        assert!(!profile.eligible(&config, i64::MAX, 0));
+        assert!(!profile.eligible(&config, i64::MIN, 0));
         profile.settled_day = i64::MAX;
-        assert!(profile.eligible(&config, i64::MAX));
+        assert!(profile.eligible(&config, i64::MAX, 0));
         config.decay_bps = u16::MAX;
-        assert!(!profile.eligible(&config, 0));
+        assert!(!profile.eligible(&config, 0, 0));
     }
 }

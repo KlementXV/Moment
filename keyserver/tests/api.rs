@@ -8,7 +8,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use http_body_util::BodyExt;
 use moment_keyserver::{
     api::{self, App, Clock},
-    chain::{Chain, CheckIn, Config, Profile},
+    chain::{Chain, CheckIn, Config, DayPool, Profile},
     error::{Error, Result},
     moderation::Reviewer,
     protocol::{self, Key},
@@ -40,6 +40,7 @@ struct TestChain {
     config: Config,
     profiles: Mutex<HashMap<Key, Profile>>,
     checkins: Mutex<HashMap<(Key, i64), CheckIn>>,
+    pools: Mutex<HashMap<i64, DayPool>>,
     available: AtomicBool,
     delayed_reads: AtomicBool,
     fail_read: Mutex<Option<Key>>,
@@ -66,6 +67,10 @@ impl Chain for TestChain {
     async fn profile(&self, wallet: Key) -> Result<Option<Profile>> {
         self.ready()?;
         Ok(self.profiles.lock().unwrap().get(&wallet).cloned())
+    }
+    async fn day_pool(&self, day: i64) -> Result<Option<DayPool>> {
+        self.ready()?;
+        Ok(self.pools.lock().unwrap().get(&day).cloned())
     }
     async fn check_in(&self, wallet: Key, day: i64) -> Result<Option<CheckIn>> {
         self.ready()?;
@@ -133,9 +138,11 @@ impl Harness {
                 min_stake: 10,
                 decay_bps: 2500,
                 max_decay_days: 30,
+                pool_close_delay: 21_600,
             },
             profiles: Mutex::new(HashMap::new()),
             checkins: Mutex::new(HashMap::new()),
+            pools: Mutex::new(HashMap::new()),
             available: AtomicBool::new(true),
             delayed_reads: AtomicBool::new(false),
             fail_read: Mutex::new(None),
@@ -207,6 +214,8 @@ impl Harness {
                 settled_day: DAY - 1,
                 exit_unlock_at: 0,
                 active: true,
+                pending_days: [-1, -1],
+                pending_stakes: [0, 0],
             },
         );
         let (status, challenge) = self

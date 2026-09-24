@@ -1,5 +1,5 @@
 use crate::{
-    chain::{self, Chain, Expected},
+    chain::{self, Chain, Config, Expected, Profile},
     error::{Error, Result},
     moderation::Reviewer,
     protocol::{self, Key, Packet},
@@ -76,7 +76,9 @@ impl App {
             self.chain.check_in(wallet, day)
         )?;
         let profile = profile.ok_or_else(Error::forbidden)?;
-        if !(profile.owner == wallet && profile.eligible(&config, self.clock.now()))
+        let now = self.clock.now();
+        let gains = closed_gains(self.chain.as_ref(), &profile, &config, now).await?;
+        if !(profile.owner == wallet && profile.eligible(&config, now, gains))
             || !checkin.is_some_and(|c| c.owner == wallet && c.day == day)
         {
             return Err(Error::forbidden());
@@ -101,6 +103,17 @@ impl App {
                     && hex::encode(c.blob_ref) == post.blob_ref
             }))
     }
+}
+
+/// Gains the program will credit before checking `min_stake`.
+async fn closed_gains(chain: &dyn Chain, profile: &Profile, config: &Config, now: i64) -> Result<u64> {
+    let mut total = 0u64;
+    for (day, stake) in profile.closed_claims(config, now) {
+        if let Some(pool) = chain.day_pool(day).await? {
+            total = total.saturating_add(chain::share(pool.penalties, stake, pool.total_stake));
+        }
+    }
+    Ok(total)
 }
 
 // Walk from the TCP peer toward the client, stopping at the first untrusted hop.
@@ -372,7 +385,12 @@ async fn submit(
     if config.authority != expected.authority {
         return Err(Error::unavailable());
     }
-    if !profile.is_some_and(|p| p.owner == wallet && p.eligible(&config, app.clock.now())) {
+    let profile = profile
+        .filter(|p| p.owner == wallet)
+        .ok_or_else(Error::forbidden)?;
+    let now = app.clock.now();
+    let gains = closed_gains(app.chain.as_ref(), &profile, &config, now).await?;
+    if !profile.eligible(&config, now, gains) {
         return Err(Error::forbidden());
     }
     if !valid {
