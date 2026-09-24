@@ -2,9 +2,10 @@ use anchor_lang::prelude::*;
 
 use crate::{
     constants::*,
-    economy::{day_of, reward},
+    economy::day_of,
     error::ClockInError,
-    state::{CheckIn, Config, Profile},
+    settlement::{settle, PoolAccounts},
+    state::{CheckIn, Config, DayPool, Profile},
 };
 
 #[derive(Accounts)]
@@ -17,7 +18,7 @@ pub struct CheckInAccounts<'info> {
     /// donc une expiration naturelle et aucun rejeu possible.
     #[account(address = config.publication_authority @ ClockInError::InvalidConfigParam)]
     pub publication_authority: Signer<'info>,
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
     #[account(
         mut,
@@ -26,6 +27,15 @@ pub struct CheckInAccounts<'info> {
         has_one = owner
     )]
     pub profile: Account<'info, Profile>,
+    /// Pool du jour : reçoit la mise du publieur et les pénalités routées vers aujourd'hui.
+    #[account(
+        init_if_needed,
+        payer = owner,
+        space = 8 + DayPool::INIT_SPACE,
+        seeds = [DAY_POOL_SEED, &day.to_le_bytes()],
+        bump
+    )]
+    pub day_pool: Account<'info, DayPool>,
     #[account(
         init,
         payer = owner,
@@ -44,35 +54,45 @@ pub fn handle_check_in(
     blob_ref: [u8; 32],
 ) -> Result<()> {
     let clock = Clock::get()?;
-    let today = day_of(clock.unix_timestamp);
-    // Le jour n'est en paramètre que pour dériver le PDA ; il est vérifié (D6).
+    let now = clock.unix_timestamp;
+    let today = day_of(now);
+    // Le jour n'est en paramètre que pour dériver les PDA ; il est vérifié (D6).
     require!(day == today, ClockInError::DayMismatch);
 
-    let config = &mut ctx.accounts.config;
-    let profile = &mut ctx.accounts.profile;
-    require!(profile.active, ClockInError::PositionInactive);
-    if profile.exit_unlock_at > 0 {
-        require!(
-            clock.unix_timestamp < profile.exit_unlock_at,
-            ClockInError::ExitUnlocked
-        );
+    let pools = PoolAccounts::new(ctx.remaining_accounts, ctx.program_id);
+    let accounts = ctx.accounts;
+    accounts.day_pool.open(today, ctx.bumps.day_pool);
+    require!(accounts.profile.active, ClockInError::PositionInactive);
+    if accounts.profile.exit_unlock_at > 0 {
+        require!(now < accounts.profile.exit_unlock_at, ClockInError::ExitUnlocked);
     }
 
-    let bound = profile.settle_bound(today);
-    profile.settle_through(config, bound);
+    let bound = accounts.profile.settle_bound(today);
+    settle(
+        &mut accounts.profile,
+        &accounts.config,
+        &mut accounts.day_pool,
+        &pools,
+        now,
+        bound,
+    )?;
+    let staked = accounts.profile.staked;
     require!(
-        profile.staked >= config.min_stake,
+        staked >= accounts.config.min_stake,
         ClockInError::InsufficientStake
     );
 
-    let paid = reward(
-        profile.staked,
-        config.reward_rate_bps,
-        config.reward_cap,
-        config.pool_balance,
-    );
-    config.pool_balance -= paid;
-    profile.staked += paid;
+    // Plus de récompense immédiate : la mise entre au pool du jour, la part se
+    // réclame après sa clôture.
+    let pool = &mut accounts.day_pool;
+    pool.total_stake = pool
+        .total_stake
+        .checked_add(staked)
+        .ok_or(ClockInError::InvalidAmount)?;
+    pool.winners_count = pool.winners_count.saturating_add(1);
+
+    let profile = &mut accounts.profile;
+    profile.add_claim(today, staked)?;
     profile.streak += 1;
     profile.settled_day = today;
     profile.last_checkin_day = today;
@@ -80,7 +100,7 @@ pub fn handle_check_in(
 
     let streak = profile.streak;
     let owner = profile.owner;
-    let check_in = &mut ctx.accounts.check_in;
+    let check_in = &mut accounts.check_in;
     check_in.owner = owner;
     check_in.day = today;
     check_in.commitment = commitment;

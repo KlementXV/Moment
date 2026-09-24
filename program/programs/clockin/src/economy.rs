@@ -41,13 +41,6 @@ pub fn decay(staked: u64, missed_days: i64, decay_bps: u16, max_decay_days: u8) 
     Decayed { remaining, lost: staked - remaining }
 }
 
-/// Récompense d'un check-in : pourcentage du solde, borné par le plafond
-/// anti-baleine puis par ce que le pool peut réellement payer (§6.1).
-pub fn reward(staked: u64, reward_rate_bps: u16, reward_cap: u64, pool_balance: u64) -> u64 {
-    let raw = (staked as u128 * reward_rate_bps as u128 / BPS_DENOMINATOR as u128) as u64;
-    raw.min(reward_cap).min(pool_balance)
-}
-
 /// Dernier jour pénalisable. Hier en temps normal ; pendant une sortie, jamais
 /// au-delà du dernier jour entièrement terminé avant le déblocage (§6.3, §6.4).
 pub fn settle_bound(exit_unlock_at: i64, today: i64) -> i64 {
@@ -191,26 +184,6 @@ mod tests {
         let unlock_at = 101 * DAY_SECONDS + 3_600;
         assert_eq!(settle_bound(unlock_at, 105), 100);
         assert_eq!(settle_bound(unlock_at, 100), 99, "on ne pénalise jamais au-delà d'hier");
-    }
-
-    #[test]
-    fn reward_is_a_percentage_of_the_stake() {
-        assert_eq!(reward(100 * SKR, 100, 10 * SKR, 1000 * SKR), SKR);
-    }
-
-    #[test]
-    fn reward_is_capped_by_reward_cap() {
-        assert_eq!(reward(10_000 * SKR, 100, SKR, 1000 * SKR), SKR);
-    }
-
-    #[test]
-    fn reward_is_capped_by_the_pool() {
-        assert_eq!(reward(100 * SKR, 100, 10 * SKR, SKR / 2), SKR / 2);
-    }
-
-    #[test]
-    fn empty_pool_pays_nothing() {
-        assert_eq!(reward(100 * SKR, 100, 10 * SKR, 0), 0);
     }
 
     #[test]

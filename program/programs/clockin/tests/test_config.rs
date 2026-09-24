@@ -13,10 +13,8 @@ fn initialize_config_sets_parameters_and_creates_an_empty_vault() {
     assert_eq!(config.publication_authority, ctx.authority.pubkey());
     assert_eq!(config.skr_mint, ctx.mint);
     assert_eq!(config.vault, ctx.vault);
-    assert_eq!(config.pool_balance, 0);
     assert_eq!(config.min_stake, MIN_STAKE);
-    assert_eq!(config.reward_rate_bps, 100);
-    assert_eq!(config.reward_cap, SKR);
+    assert_eq!(config.pool_close_delay_seconds, 21_600);
     assert_eq!(config.decay_bps, 2500);
     assert_eq!(config.max_decay_days, 30);
     assert_eq!(config.withdrawal_delay_seconds, 172_800);
@@ -37,7 +35,8 @@ fn seed_pool_moves_tokens_into_the_vault_and_credits_the_pool() {
     ctx.seed_pool(500 * SKR).unwrap();
 
     assert_eq!(ctx.vault_balance(), 500 * SKR);
-    assert_eq!(ctx.config_state().pool_balance, 500 * SKR);
+    let today = ctx.today();
+    assert_eq!(ctx.day_pool_state(today).unwrap().penalties, 500 * SKR);
 }
 
 #[test]
@@ -47,14 +46,26 @@ fn update_config_recalibrates_without_touching_the_pool() {
 
     ctx.update_config(|params| {
         params.decay_bps = 5000;
-        params.reward_rate_bps = 200;
+        params.pool_close_delay_seconds = 3_600;
     })
     .unwrap();
 
     let config = ctx.config_state();
     assert_eq!(config.decay_bps, 5000);
-    assert_eq!(config.reward_rate_bps, 200);
-    assert_eq!(config.pool_balance, 500 * SKR, "le pool ne doit pas bouger");
+    assert_eq!(config.pool_close_delay_seconds, 3_600);
+    let today = ctx.today();
+    assert_eq!(
+        ctx.day_pool_state(today).unwrap().penalties,
+        500 * SKR,
+        "le pool ne doit pas bouger"
+    );
+}
+
+#[test]
+fn update_config_refuses_a_close_delay_of_a_full_day() {
+    let mut ctx = Ctx::new();
+    let result = ctx.update_config(|params| params.pool_close_delay_seconds = 86_400);
+    assert!(result.is_err(), "la clôture doit tomber avant la fin du lendemain");
 }
 
 #[test]

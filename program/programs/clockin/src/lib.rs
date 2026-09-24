@@ -2,6 +2,7 @@ pub mod constants;
 pub mod economy;
 pub mod error;
 pub mod instructions;
+pub mod settlement;
 pub mod state;
 
 use anchor_lang::prelude::*;
@@ -32,8 +33,8 @@ pub mod clockin {
         instructions::initialize_config::handle_set_publication_authority(ctx, new_authority)
     }
 
-    pub fn seed_pool(ctx: Context<SeedPool>, amount: u64) -> Result<()> {
-        instructions::initialize_config::handle_seed_pool(ctx, amount)
+    pub fn seed_pool(ctx: Context<SeedPool>, day: i64, amount: u64) -> Result<()> {
+        instructions::initialize_config::handle_seed_pool(ctx, day, amount)
     }
 
     pub fn create_profile(ctx: Context<CreateProfile>) -> Result<()> {
@@ -44,8 +45,8 @@ pub mod clockin {
         instructions::profile::handle_faucet(ctx)
     }
 
-    pub fn stake(ctx: Context<Stake>, amount: u64) -> Result<()> {
-        instructions::stake::handle_stake(ctx, amount)
+    pub fn stake(ctx: Context<Stake>, day: i64, amount: u64) -> Result<()> {
+        instructions::stake::handle_stake(ctx, day, amount)
     }
 
     pub fn check_in(
@@ -57,19 +58,19 @@ pub mod clockin {
         instructions::check_in::handle_check_in(ctx, day, commitment, blob_ref)
     }
 
-    pub fn reap(ctx: Context<Reap>) -> Result<()> {
-        instructions::reap::handle_reap(ctx)
+    pub fn reap(ctx: Context<Reap>, day: i64) -> Result<()> {
+        instructions::reap::handle_reap(ctx, day)
     }
 
-    pub fn request_exit(ctx: Context<ExitRequest>) -> Result<()> {
-        instructions::exit::handle_request_exit(ctx)
+    pub fn request_exit(ctx: Context<RequestExit>, day: i64) -> Result<()> {
+        instructions::exit::handle_request_exit(ctx, day)
     }
 
-    pub fn cancel_exit(ctx: Context<ExitRequest>) -> Result<()> {
+    pub fn cancel_exit(ctx: Context<CancelExit>) -> Result<()> {
         instructions::exit::handle_cancel_exit(ctx)
     }
 
-    pub fn finalize_exit(ctx: Context<FinalizeExit>) -> Result<()> {
-        instructions::exit::handle_finalize_exit(ctx)
+    pub fn finalize_exit(ctx: Context<FinalizeExit>, day: i64) -> Result<()> {
+        instructions::exit::handle_finalize_exit(ctx, day)
     }
 }

@@ -1,18 +1,28 @@
 mod common;
 
+use clockin::economy::share;
 use common::{Ctx, User, SKR};
 
-/// Σ staked + pool_balance == solde du vault, après chaque étape.
-fn assert_conservation(ctx: &Ctx, users: &[&User]) {
-    let total: u64 = users
+/// Solvabilité : le vault couvre les mises et les parts déjà dues, et ce qui
+/// reste au-delà ne vient que des pools.
+fn assert_solvent(ctx: &Ctx, users: &[&User]) {
+    let owed: u64 = users
         .iter()
-        .map(|user| ctx.profile_state(&user.profile).staked)
+        .map(|user| {
+            let profile = ctx.profile_state(&user.profile);
+            let pending: u64 = (0..2)
+                .filter(|i| profile.pending_days[*i] >= 0)
+                .map(|i| {
+                    let pool = ctx.day_pool_state(profile.pending_days[i]).unwrap();
+                    share(pool.penalties, profile.pending_stakes[i], pool.total_stake)
+                })
+                .sum();
+            profile.staked + pending
+        })
         .sum();
-    assert_eq!(
-        total + ctx.config_state().pool_balance,
-        ctx.vault_balance(),
-        "le vault doit contenir exactement les mises plus le pool"
-    );
+    let vault = ctx.vault_balance();
+    assert!(vault >= owed, "le vault doit couvrir {owed}, il contient {vault}");
+    assert!(vault - owed <= ctx.pooled(), "rien ne reste au vault hors des pools");
 }
 
 #[test]
@@ -24,18 +34,18 @@ fn a_full_week_with_a_regular_and_a_lapsed_member_conserves_every_token() {
     let lapsed = ctx.new_user();
     ctx.stake(&regular, 60 * SKR).unwrap();
     ctx.stake(&lapsed, 60 * SKR).unwrap();
-    assert_conservation(&ctx, &[&regular, &lapsed]);
+    assert_solvent(&ctx, &[&regular, &lapsed]);
 
     for _ in 0..6 {
         ctx.check_in(&regular).unwrap();
-        assert_conservation(&ctx, &[&regular, &lapsed]);
+        assert_solvent(&ctx, &[&regular, &lapsed]);
         ctx.warp_days(1);
     }
 
     // Le retardataire est réglé par un tiers.
     let lapsed_owner = lapsed.pubkey();
     ctx.reap(&lapsed_owner).unwrap();
-    assert_conservation(&ctx, &[&regular, &lapsed]);
+    assert_solvent(&ctx, &[&regular, &lapsed]);
 
     let regular_profile = ctx.profile_state(&regular.profile);
     let lapsed_profile = ctx.profile_state(&lapsed.profile);
@@ -54,10 +64,9 @@ fn a_full_week_with_a_regular_and_a_lapsed_member_conserves_every_token() {
     ctx.finalize_exit(&regular_owner, &regular_token).unwrap();
     ctx.finalize_exit(&lapsed_owner, &lapsed_token).unwrap();
 
-    assert_conservation(&ctx, &[&regular, &lapsed]);
-    assert_eq!(
-        ctx.vault_balance(),
-        ctx.config_state().pool_balance,
-        "il ne reste au vault que le pool non distribué"
+    assert_solvent(&ctx, &[&regular, &lapsed]);
+    assert!(
+        ctx.vault_balance() <= ctx.pooled(),
+        "il ne reste que la poussière et les pools non distribués"
     );
 }

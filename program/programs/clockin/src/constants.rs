@@ -8,3 +8,5 @@ pub const VAULT_SEED: &[u8] = b"vault";
 pub const PROFILE_SEED: &[u8] = b"profile";
 #[constant]
 pub const CHECKIN_SEED: &[u8] = b"checkin";
+#[constant]
+pub const DAY_POOL_SEED: &[u8] = b"day_pool";

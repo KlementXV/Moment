@@ -5,13 +5,73 @@ use crate::{
     constants::*,
     economy::day_of,
     error::ClockInError,
-    state::{Config, Profile},
+    settlement::{settle, PoolAccounts},
+    state::{Config, DayPool, Profile},
 };
 
 #[derive(Accounts)]
-pub struct ExitRequest<'info> {
+#[instruction(day: i64)]
+pub struct RequestExit<'info> {
+    #[account(mut)]
     pub owner: Signer<'info>,
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(
+        mut,
+        seeds = [PROFILE_SEED, owner.key().as_ref()],
+        bump = profile.bump,
+        has_one = owner
+    )]
+    pub profile: Account<'info, Profile>,
+    /// Pool du jour : reçoit les pénalités routées vers aujourd'hui.
+    #[account(
+        init_if_needed,
+        payer = owner,
+        space = 8 + DayPool::INIT_SPACE,
+        seeds = [DAY_POOL_SEED, &day.to_le_bytes()],
+        bump
+    )]
+    pub day_pool: Account<'info, DayPool>,
+    pub system_program: Program<'info, System>,
+}
+
+pub fn handle_request_exit(ctx: Context<RequestExit>, day: i64) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let today = day_of(now);
+    require!(day == today, ClockInError::DayMismatch);
+    let pools = PoolAccounts::new(ctx.remaining_accounts, ctx.program_id);
+    let accounts = ctx.accounts;
+    accounts.day_pool.open(today, ctx.bumps.day_pool);
+    require!(accounts.profile.active, ClockInError::PositionInactive);
+    require!(
+        accounts.profile.exit_unlock_at == 0,
+        ClockInError::ExitAlreadyRequested
+    );
+
+    // Régler d'abord : on ne sort pas d'une position en dissimulant ses absences.
+    let bound = accounts.profile.settle_bound(today);
+    settle(
+        &mut accounts.profile,
+        &accounts.config,
+        &mut accounts.day_pool,
+        &pools,
+        now,
+        bound,
+    )?;
+
+    let profile = &mut accounts.profile;
+    profile.exit_requested_at = now;
+    // Délai figé pour cette demande, même si la configuration change ensuite (§6.3).
+    profile.exit_unlock_at = now
+        .checked_add(accounts.config.withdrawal_delay_seconds)
+        .ok_or(ClockInError::InvalidConfigParam)?;
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct CancelExit<'info> {
+    pub owner: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
     #[account(
         mut,
@@ -22,28 +82,7 @@ pub struct ExitRequest<'info> {
     pub profile: Account<'info, Profile>,
 }
 
-pub fn handle_request_exit(ctx: Context<ExitRequest>) -> Result<()> {
-    let clock = Clock::get()?;
-    let today = day_of(clock.unix_timestamp);
-    let config = &mut ctx.accounts.config;
-    let profile = &mut ctx.accounts.profile;
-    require!(profile.active, ClockInError::PositionInactive);
-    require!(profile.exit_unlock_at == 0, ClockInError::ExitAlreadyRequested);
-
-    // Régler d'abord : on ne sort pas d'une position en dissimulant ses absences.
-    let bound = profile.settle_bound(today);
-    profile.settle_through(config, bound);
-
-    profile.exit_requested_at = clock.unix_timestamp;
-    // Délai figé pour cette demande, même si la configuration change ensuite (§6.3).
-    profile.exit_unlock_at = clock
-        .unix_timestamp
-        .checked_add(config.withdrawal_delay_seconds)
-        .ok_or(ClockInError::InvalidConfigParam)?;
-    Ok(())
-}
-
-pub fn handle_cancel_exit(ctx: Context<ExitRequest>) -> Result<()> {
+pub fn handle_cancel_exit(ctx: Context<CancelExit>) -> Result<()> {
     let clock = Clock::get()?;
     let profile = &mut ctx.accounts.profile;
     require!(profile.exit_unlock_at > 0, ClockInError::NoExitRequested);
@@ -58,12 +97,15 @@ pub fn handle_cancel_exit(ctx: Context<ExitRequest>) -> Result<()> {
 }
 
 #[derive(Accounts)]
+#[instruction(day: i64)]
 pub struct FinalizeExit<'info> {
-    /// Permissionless : un keeper peut finaliser pour le propriétaire.
+    /// Permissionless : un keeper peut finaliser pour le propriétaire. Il paie
+    /// seulement le pool du jour s'il est à créer.
+    #[account(mut)]
     pub caller: Signer<'info>,
     /// CHECK: propriétaire de la position, lié au profil par `has_one`.
     pub owner: UncheckedAccount<'info>,
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
     #[account(
         mut,
@@ -72,6 +114,15 @@ pub struct FinalizeExit<'info> {
         has_one = owner
     )]
     pub profile: Account<'info, Profile>,
+    /// Pool du jour : reçoit les pénalités routées vers aujourd'hui.
+    #[account(
+        init_if_needed,
+        payer = caller,
+        space = 8 + DayPool::INIT_SPACE,
+        seeds = [DAY_POOL_SEED, &day.to_le_bytes()],
+        bump
+    )]
+    pub day_pool: Account<'info, DayPool>,
     #[account(address = config.skr_mint)]
     pub skr_mint: Account<'info, Mint>,
     /// Le versement est toujours adressé au propriétaire, jamais à l'appelant.
@@ -84,22 +135,41 @@ pub struct FinalizeExit<'info> {
     #[account(mut, address = config.vault)]
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
-pub fn handle_finalize_exit(ctx: Context<FinalizeExit>) -> Result<()> {
-    let clock = Clock::get()?;
+pub fn handle_finalize_exit(mut ctx: Context<FinalizeExit>, day: i64) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let today = day_of(now);
+    require!(day == today, ClockInError::DayMismatch);
     {
-        let config = &mut ctx.accounts.config;
-        let profile = &mut ctx.accounts.profile;
-        require!(profile.exit_unlock_at > 0, ClockInError::NoExitRequested);
+        let pools = PoolAccounts::new(ctx.remaining_accounts, ctx.program_id);
+        let accounts = &mut ctx.accounts;
+        accounts.day_pool.open(today, ctx.bumps.day_pool);
         require!(
-            clock.unix_timestamp >= profile.exit_unlock_at,
+            accounts.profile.exit_unlock_at > 0,
+            ClockInError::NoExitRequested
+        );
+        require!(
+            now >= accounts.profile.exit_unlock_at,
             ClockInError::ExitLocked
         );
         // Dernière journée pénalisable : celle entièrement terminée avant le
         // déblocage. Une finalisation tardive ne coûte donc rien de plus (§6.3).
-        let bound = day_of(profile.exit_unlock_at) - 1;
-        profile.settle_through(config, bound);
+        let bound = day_of(accounts.profile.exit_unlock_at) - 1;
+        settle(
+            &mut accounts.profile,
+            &accounts.config,
+            &mut accounts.day_pool,
+            &pools,
+            now,
+            bound,
+        )?;
+        // Une part encore ouverte serait perdue avec la position : on attend sa clôture.
+        require!(
+            !accounts.profile.has_pending(),
+            ClockInError::ClaimStillOpen
+        );
     }
 
     let amount = ctx.accounts.profile.staked;

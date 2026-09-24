@@ -1,6 +1,9 @@
 use anchor_lang::prelude::*;
 
-use crate::economy::{decay, settle_bound};
+use crate::{economy::settle_bound, error::ClockInError};
+
+pub const PENDING_SLOTS: usize = 2;
+pub const NO_PENDING_DAY: i64 = -1;
 
 /// PDA singleton, graine `CONFIG_SEED`. Autorité du vault et porteur des
 /// paramètres économiques, calibrables sans redéploiement (§15.2).
@@ -12,13 +15,11 @@ pub struct Config {
     pub publication_authority: Pubkey,
     pub skr_mint: Pubkey,
     pub vault: Pubkey,
-    /// Part du vault qui appartient au pool de redistribution.
-    pub pool_balance: u64,
     pub min_stake: u64,
-    pub reward_cap: u64,
     pub faucet_amount: u64,
     pub withdrawal_delay_seconds: i64,
-    pub reward_rate_bps: u16,
+    /// Délai après la fin du jour D avant la clôture de son pool (spec pool journalier).
+    pub pool_close_delay_seconds: i64,
     pub decay_bps: u16,
     pub max_decay_days: u8,
     pub faucet_enabled: bool,
@@ -45,6 +46,10 @@ pub struct Profile {
     pub active: bool,
     pub faucet_claimed: bool,
     pub bump: u8,
+    /// Créances sur les pools des jours publiés : `NO_PENDING_DAY` = emplacement
+    /// libre. Deux suffisent : J-1 pas encore clôturé et J.
+    pub pending_days: [i64; PENDING_SLOTS],
+    pub pending_stakes: [u64; PENDING_SLOTS],
 }
 
 /// PDA par couple wallet × jour : rend le double check-in structurellement
@@ -63,27 +68,44 @@ pub struct CheckIn {
     pub streak_at_checkin: u32,
 }
 
+/// PDA par jour, graines `DAY_POOL_SEED || day` : mises des publieurs du jour
+/// et pénalités à leur partager.
+#[account]
+#[derive(InitSpace)]
+pub struct DayPool {
+    pub day: i64,
+    pub penalties: u64,
+    pub total_stake: u64,
+    /// Affichage seulement.
+    pub winners_count: u32,
+    pub bump: u8,
+}
+
+impl DayPool {
+    /// Idempotent : `init_if_needed` ne dit pas si le compte vient d'être créé.
+    pub fn open(&mut self, day: i64, bump: u8) {
+        self.day = day;
+        self.bump = bump;
+    }
+}
+
 impl Profile {
     pub fn settle_bound(&self, today: i64) -> i64 {
         settle_bound(self.exit_unlock_at, today)
     }
 
-    /// Applique le decay des jours non réglés jusqu'à `through_day` inclus.
-    /// Le montant perdu alimente le pool ; aucun token SPL ne bouge.
-    /// Séparer `settled_day` de `last_checkin_day` est ce qui rend `reap` sûr
-    /// contre le double-decay : un jour réglé ne l'est jamais deux fois.
-    pub fn settle_through(&mut self, config: &mut Config, through_day: i64) {
-        if !self.active {
-            return;
-        }
-        let missed = through_day - self.settled_day;
-        if missed <= 0 {
-            return;
-        }
-        let outcome = decay(self.staked, missed, config.decay_bps, config.max_decay_days);
-        self.staked = outcome.remaining;
-        config.pool_balance = config.pool_balance.saturating_add(outcome.lost);
-        self.settled_day = through_day;
-        self.streak = 0;
+    pub fn has_pending(&self) -> bool {
+        self.pending_days.iter().any(|day| *day != NO_PENDING_DAY)
+    }
+
+    pub fn add_claim(&mut self, day: i64, stake: u64) -> Result<()> {
+        let slot = self
+            .pending_days
+            .iter()
+            .position(|d| *d == NO_PENDING_DAY)
+            .ok_or(ClockInError::TooManyPendingClaims)?;
+        self.pending_days[slot] = day;
+        self.pending_stakes[slot] = stake;
+        Ok(())
     }
 }

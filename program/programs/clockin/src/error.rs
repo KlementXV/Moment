@@ -30,4 +30,10 @@ pub enum ClockInError {
     InvalidOwnerTokenAccount,
     #[msg("Paramètre de configuration invalide")]
     InvalidConfigParam,
+    #[msg("Un pool de jour attendu manque dans les comptes fournis")]
+    MissingDayPool,
+    #[msg("Trop de créances ouvertes sur ce profil")]
+    TooManyPendingClaims,
+    #[msg("Une part du pool n'est pas encore réclamable")]
+    ClaimStillOpen,
 }

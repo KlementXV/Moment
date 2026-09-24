@@ -6,10 +6,16 @@
 use {
     anchor_lang::{
         prelude::Pubkey,
-        solana_program::{instruction::Instruction, system_program},
+        solana_program::{
+            instruction::{AccountMeta, Instruction},
+            system_program,
+        },
         AccountDeserialize, InstructionData, ToAccountMetas,
     },
-    clockin::state::{CheckIn, Config, Profile},
+    clockin::{
+        economy::{pool_closes_at, settle_bound},
+        state::{CheckIn, Config, DayPool, Profile},
+    },
     litesvm::{types::TransactionResult, LiteSVM},
     litesvm_token::{spl_token, CreateAssociatedTokenAccount, CreateMint},
     solana_clock::Clock,
@@ -24,6 +30,10 @@ pub const SKR: u64 = 1_000_000_000;
 pub const MIN_STAKE: u64 = 10 * SKR;
 pub const FAUCET_AMOUNT: u64 = 100 * SKR;
 pub const DAY: i64 = 86_400;
+/// Clôture du pool de D à D+1 06:00 UTC (spec pool journalier).
+pub const CLOSE_DELAY: i64 = 21_600;
+/// Horloge figée au 2026-09-10 à 12 h UTC.
+const ORIGIN: i64 = 1_789_041_600;
 
 /// litesvm 0.10 embarque le runtime agave 3.1, qui ne charge pas les ELF SBPF v3
 /// produits par défaut par `anchor build`. Sans cette garde, l'échec est un
@@ -57,6 +67,8 @@ pub struct Ctx {
     pub config: Pubkey,
     pub vault: Pubkey,
     pub admin_token: Option<Pubkey>,
+    /// Jour UTC du début du test : borne basse de `pooled()`.
+    pub origin_day: i64,
 }
 
 impl Ctx {
@@ -74,7 +86,7 @@ impl Ctx {
         // journée décide quel jour est « entièrement terminé avant le déblocage »
         // (§6.3) : la laisser dépendre de l'heure réelle rendrait ces tests instables.
         let mut clock = svm.get_sysvar::<Clock>();
-        clock.unix_timestamp = 1_789_041_600;
+        clock.unix_timestamp = ORIGIN;
         svm.set_sysvar(&clock);
 
         let admin = Keypair::new();
@@ -94,7 +106,16 @@ impl Ctx {
             .send()
             .unwrap();
 
-        Ctx { svm, admin, authority, mint, config, vault, admin_token: None }
+        Ctx {
+            svm,
+            admin,
+            authority,
+            mint,
+            config,
+            vault,
+            admin_token: None,
+            origin_day: ORIGIN.div_euclid(DAY),
+        }
     }
 
     /// Déploie et initialise avec les paramètres de travail de la feuille de route.
@@ -110,10 +131,9 @@ impl Ctx {
     ) -> TransactionResult {
         let mut params = clockin::instructions::ConfigParams {
             min_stake: MIN_STAKE,
-            reward_cap: SKR,
             faucet_amount: FAUCET_AMOUNT,
             withdrawal_delay_seconds: 172_800,
-            reward_rate_bps: 100,
+            pool_close_delay_seconds: CLOSE_DELAY,
             decay_bps: 2500,
             max_decay_days: 30,
             faucet_enabled: true,
@@ -157,18 +177,21 @@ impl Ctx {
     pub fn seed_pool(&mut self, amount: u64) -> TransactionResult {
         let admin_token = self.admin_token_account();
         self.mint_for_tests(&admin_token, amount);
+        let day = self.today();
         let instruction = Instruction {
             program_id: clockin::id(),
             accounts: clockin::accounts::SeedPool {
                 admin: self.admin.pubkey(),
                 config: self.config,
+                day_pool: self.day_pool_address(day),
                 skr_mint: self.mint,
                 admin_token_account: admin_token,
                 vault: self.vault,
                 token_program: spl_token::ID,
+                system_program: system_program::ID,
             }
             .to_account_metas(None),
-            data: clockin::instruction::SeedPool { amount }.data(),
+            data: clockin::instruction::SeedPool { day, amount }.data(),
         };
         let admin = self.admin.insecure_clone();
         self.send(&[instruction], &[&admin])
@@ -206,10 +229,9 @@ impl Ctx {
         let current = self.config_state();
         let mut params = clockin::instructions::ConfigParams {
             min_stake: current.min_stake,
-            reward_cap: current.reward_cap,
             faucet_amount: current.faucet_amount,
             withdrawal_delay_seconds: current.withdrawal_delay_seconds,
-            reward_rate_bps: current.reward_rate_bps,
+            pool_close_delay_seconds: current.pool_close_delay_seconds,
             decay_bps: current.decay_bps,
             max_decay_days: current.max_decay_days,
             faucet_enabled: current.faucet_enabled,
@@ -320,6 +342,73 @@ impl Ctx {
         .0
     }
 
+    pub fn day_pool_address(&self, day: i64) -> Pubkey {
+        Pubkey::find_program_address(
+            &[clockin::constants::DAY_POOL_SEED, &day.to_le_bytes()],
+            &clockin::id(),
+        )
+        .0
+    }
+
+    pub fn day_pool_state(&self, day: i64) -> Option<DayPool> {
+        let account = self.svm.get_account(&self.day_pool_address(day))?;
+        if account.data.is_empty() {
+            return None;
+        }
+        Some(DayPool::try_deserialize(&mut account.data.as_slice()).unwrap())
+    }
+
+    /// Pénalités et amorçages entrés dans les pools depuis le début du test.
+    pub fn pooled(&self) -> u64 {
+        (self.origin_day - 1..=self.today())
+            .filter_map(|day| self.day_pool_state(day))
+            .map(|pool| pool.penalties)
+            .sum()
+    }
+
+    /// Avance jusqu'à la prochaine occurrence de cette seconde de la journée UTC.
+    pub fn warp_to_next(&mut self, second_of_day: i64) {
+        let now = self.now();
+        let mut target = now.div_euclid(DAY) * DAY + second_of_day;
+        if target <= now {
+            target += DAY;
+        }
+        self.warp_seconds(target - now);
+    }
+
+    fn stored_profile(&self, owner: &Pubkey) -> Option<Profile> {
+        let account = self.svm.get_account(&self.profile_address(owner))?;
+        if account.data.is_empty() {
+            return None;
+        }
+        Some(Profile::try_deserialize(&mut account.data.as_slice()).unwrap())
+    }
+
+    /// Comptes restants qu'un client honnête joint pour régler jusqu'à `bound`.
+    pub fn pool_metas(&self, owner: &Pubkey, bound: i64) -> Vec<AccountMeta> {
+        let Some(profile) = self.stored_profile(owner) else {
+            return vec![];
+        };
+        let now = self.now();
+        let delay = self.config_state().pool_close_delay_seconds;
+        let mut metas: Vec<AccountMeta> = profile
+            .pending_days
+            .iter()
+            .filter(|day| **day >= 0 && now >= pool_closes_at(**day, delay))
+            .map(|day| AccountMeta::new_readonly(self.day_pool_address(*day), false))
+            .collect();
+        if profile.active && bound > profile.settled_day && now < pool_closes_at(bound, delay) {
+            metas.push(AccountMeta::new(self.day_pool_address(bound), false));
+        }
+        metas
+    }
+
+    /// Pools d'un règlement ordinaire (hors finalisation de sortie).
+    pub fn honest_pools(&self, owner: &Pubkey) -> Vec<AccountMeta> {
+        let unlock = self.stored_profile(owner).map_or(0, |profile| profile.exit_unlock_at);
+        self.pool_metas(owner, settle_bound(unlock, self.today()))
+    }
+
     pub fn create_profile(&mut self, user: &User) -> TransactionResult {
         let instruction = Instruction {
             program_id: clockin::id(),
@@ -354,19 +443,24 @@ impl Ctx {
     }
 
     pub fn stake(&mut self, user: &User, amount: u64) -> TransactionResult {
+        let day = self.today();
+        let mut accounts = clockin::accounts::Stake {
+            owner: user.pubkey(),
+            config: self.config,
+            profile: user.profile,
+            day_pool: self.day_pool_address(day),
+            skr_mint: self.mint,
+            owner_token_account: user.token_account,
+            vault: self.vault,
+            token_program: spl_token::ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None);
+        accounts.extend(self.honest_pools(&user.pubkey()));
         let instruction = Instruction {
             program_id: clockin::id(),
-            accounts: clockin::accounts::Stake {
-                owner: user.pubkey(),
-                config: self.config,
-                profile: user.profile,
-                skr_mint: self.mint,
-                owner_token_account: user.token_account,
-                vault: self.vault,
-                token_program: spl_token::ID,
-            }
-            .to_account_metas(None),
-            data: clockin::instruction::Stake { amount }.data(),
+            accounts,
+            data: clockin::instruction::Stake { day, amount }.data(),
         };
         let signer = user.keypair.insecure_clone();
         self.send(&[instruction], &[&signer])
@@ -396,17 +490,20 @@ impl Ctx {
         commitment: [u8; 32],
         blob_ref: [u8; 32],
     ) -> TransactionResult {
+        let mut accounts = clockin::accounts::CheckInAccounts {
+            owner: user.pubkey(),
+            publication_authority: authority.pubkey(),
+            config: self.config,
+            profile: user.profile,
+            day_pool: self.day_pool_address(day),
+            check_in: self.check_in_address(&user.pubkey(), day),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None);
+        accounts.extend(self.honest_pools(&user.pubkey()));
         let instruction = Instruction {
             program_id: clockin::id(),
-            accounts: clockin::accounts::CheckInAccounts {
-                owner: user.pubkey(),
-                publication_authority: authority.pubkey(),
-                config: self.config,
-                profile: user.profile,
-                check_in: self.check_in_address(&user.pubkey(), day),
-                system_program: system_program::ID,
-            }
-            .to_account_metas(None),
+            accounts,
             data: clockin::instruction::CheckIn { day, commitment, blob_ref }.data(),
         };
         let owner = user.keypair.insecure_clone();
@@ -417,41 +514,61 @@ impl Ctx {
     /// Appelé par l'admin, qui n'est ni le propriétaire ni un bénéficiaire :
     /// c'est bien un tiers qui déclenche le règlement.
     pub fn reap(&mut self, owner: &Pubkey) -> TransactionResult {
+        let day = self.today();
+        let pools = self.honest_pools(owner);
+        self.reap_with(owner, day, pools)
+    }
+
+    pub fn reap_with(&mut self, owner: &Pubkey, day: i64, pools: Vec<AccountMeta>) -> TransactionResult {
+        let mut accounts = clockin::accounts::Reap {
+            caller: self.admin.pubkey(),
+            owner: *owner,
+            config: self.config,
+            profile: self.profile_address(owner),
+            day_pool: self.day_pool_address(day),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None);
+        accounts.extend(pools);
         let instruction = Instruction {
             program_id: clockin::id(),
-            accounts: clockin::accounts::Reap {
-                caller: self.admin.pubkey(),
-                owner: *owner,
-                config: self.config,
-                profile: self.profile_address(owner),
-            }
-            .to_account_metas(None),
-            data: clockin::instruction::Reap {}.data(),
+            accounts,
+            data: clockin::instruction::Reap { day }.data(),
         };
         let admin = self.admin.insecure_clone();
         self.send(&[instruction], &[&admin])
     }
 
     pub fn request_exit(&mut self, user: &User) -> TransactionResult {
-        let data = clockin::instruction::RequestExit {}.data();
-        self.exit_request_instruction(user, data)
+        let day = self.today();
+        let mut accounts = clockin::accounts::RequestExit {
+            owner: user.pubkey(),
+            config: self.config,
+            profile: user.profile,
+            day_pool: self.day_pool_address(day),
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None);
+        accounts.extend(self.honest_pools(&user.pubkey()));
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts,
+            data: clockin::instruction::RequestExit { day }.data(),
+        };
+        let signer = user.keypair.insecure_clone();
+        self.send(&[instruction], &[&signer])
     }
 
     pub fn cancel_exit(&mut self, user: &User) -> TransactionResult {
-        let data = clockin::instruction::CancelExit {}.data();
-        self.exit_request_instruction(user, data)
-    }
-
-    fn exit_request_instruction(&mut self, user: &User, data: Vec<u8>) -> TransactionResult {
         let instruction = Instruction {
             program_id: clockin::id(),
-            accounts: clockin::accounts::ExitRequest {
+            accounts: clockin::accounts::CancelExit {
                 owner: user.pubkey(),
                 config: self.config,
                 profile: user.profile,
             }
             .to_account_metas(None),
-            data,
+            data: clockin::instruction::CancelExit {}.data(),
         };
         let signer = user.keypair.insecure_clone();
         self.send(&[instruction], &[&signer])
@@ -468,20 +585,31 @@ impl Ctx {
         owner: &Pubkey,
         owner_token_account: &Pubkey,
     ) -> TransactionResult {
+        let day = self.today();
+        // Une finalisation règle jusqu'au dernier jour entier avant le déblocage.
+        let bound = self
+            .profile_state(&self.profile_address(owner))
+            .exit_unlock_at
+            .div_euclid(DAY)
+            - 1;
+        let mut accounts = clockin::accounts::FinalizeExit {
+            caller: caller.pubkey(),
+            owner: *owner,
+            config: self.config,
+            profile: self.profile_address(owner),
+            day_pool: self.day_pool_address(day),
+            skr_mint: self.mint,
+            owner_token_account: *owner_token_account,
+            vault: self.vault,
+            token_program: spl_token::ID,
+            system_program: system_program::ID,
+        }
+        .to_account_metas(None);
+        accounts.extend(self.pool_metas(owner, bound));
         let instruction = Instruction {
             program_id: clockin::id(),
-            accounts: clockin::accounts::FinalizeExit {
-                caller: caller.pubkey(),
-                owner: *owner,
-                config: self.config,
-                profile: self.profile_address(owner),
-                skr_mint: self.mint,
-                owner_token_account: *owner_token_account,
-                vault: self.vault,
-                token_program: spl_token::ID,
-            }
-            .to_account_metas(None),
-            data: clockin::instruction::FinalizeExit {}.data(),
+            accounts,
+            data: clockin::instruction::FinalizeExit { day }.data(),
         };
         let caller = caller.insecure_clone();
         self.send(&[instruction], &[&caller])

@@ -15,6 +15,7 @@ fn create_profile_starts_inactive_and_empty() {
     assert_eq!(profile.streak, 0);
     assert_eq!(profile.total_checkins, 0);
     assert!(!profile.faucet_claimed);
+    assert_eq!(profile.pending_days, [-1, -1]);
 }
 
 #[test]

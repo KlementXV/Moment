@@ -1,17 +1,21 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{transfer_checked, Mint, Token, TokenAccount, TransferChecked};
 
-use crate::{constants::*, error::ClockInError, state::Config};
+use crate::{
+    constants::*,
+    economy::{day_of, valid_close_delay},
+    error::ClockInError,
+    state::{Config, DayPool},
+};
 
 /// Paramètres économiques. Regroupés pour que l'ajout d'un paramètre ne change
 /// pas la signature de l'instruction côté client.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
 pub struct ConfigParams {
     pub min_stake: u64,
-    pub reward_cap: u64,
     pub faucet_amount: u64,
     pub withdrawal_delay_seconds: i64,
-    pub reward_rate_bps: u16,
+    pub pool_close_delay_seconds: i64,
     pub decay_bps: u16,
     pub max_decay_days: u8,
     pub faucet_enabled: bool,
@@ -20,9 +24,12 @@ pub struct ConfigParams {
 impl ConfigParams {
     pub fn validate(&self) -> Result<()> {
         require!(self.decay_bps <= 10_000, ClockInError::InvalidConfigParam);
-        require!(self.reward_rate_bps <= 10_000, ClockInError::InvalidConfigParam);
         require!(self.max_decay_days >= 1, ClockInError::InvalidConfigParam);
         require!(self.withdrawal_delay_seconds >= 0, ClockInError::InvalidConfigParam);
+        require!(
+            valid_close_delay(self.pool_close_delay_seconds),
+            ClockInError::InvalidConfigParam
+        );
         Ok(())
     }
 }
@@ -62,12 +69,10 @@ pub fn handle_initialize_config(ctx: Context<InitializeConfig>, params: ConfigPa
     config.publication_authority = ctx.accounts.publication_authority.key();
     config.skr_mint = ctx.accounts.skr_mint.key();
     config.vault = ctx.accounts.vault.key();
-    config.pool_balance = 0;
     config.min_stake = params.min_stake;
-    config.reward_cap = params.reward_cap;
     config.faucet_amount = params.faucet_amount;
     config.withdrawal_delay_seconds = params.withdrawal_delay_seconds;
-    config.reward_rate_bps = params.reward_rate_bps;
+    config.pool_close_delay_seconds = params.pool_close_delay_seconds;
     config.decay_bps = params.decay_bps;
     config.max_decay_days = params.max_decay_days;
     config.faucet_enabled = params.faucet_enabled;
@@ -88,10 +93,9 @@ pub fn handle_update_config(ctx: Context<UpdateConfig>, params: ConfigParams) ->
     params.validate()?;
     let config = &mut ctx.accounts.config;
     config.min_stake = params.min_stake;
-    config.reward_cap = params.reward_cap;
     config.faucet_amount = params.faucet_amount;
     config.withdrawal_delay_seconds = params.withdrawal_delay_seconds;
-    config.reward_rate_bps = params.reward_rate_bps;
+    config.pool_close_delay_seconds = params.pool_close_delay_seconds;
     config.decay_bps = params.decay_bps;
     config.max_decay_days = params.max_decay_days;
     config.faucet_enabled = params.faucet_enabled;
@@ -109,11 +113,21 @@ pub fn handle_set_publication_authority(
 }
 
 #[derive(Accounts)]
+#[instruction(day: i64)]
 pub struct SeedPool<'info> {
     #[account(mut, address = config.admin @ ClockInError::InvalidConfigParam)]
     pub admin: Signer<'info>,
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
+    /// L'amorçage va aux publieurs du jour, comme une pénalité.
+    #[account(
+        init_if_needed,
+        payer = admin,
+        space = 8 + DayPool::INIT_SPACE,
+        seeds = [DAY_POOL_SEED, &day.to_le_bytes()],
+        bump
+    )]
+    pub day_pool: Account<'info, DayPool>,
     #[account(address = config.skr_mint)]
     pub skr_mint: Account<'info, Mint>,
     #[account(
@@ -125,12 +139,18 @@ pub struct SeedPool<'info> {
     #[account(mut, address = config.vault)]
     pub vault: Account<'info, TokenAccount>,
     pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 /// Amorçage du pool (§6.2) : dépôt explicite de l'admin, présenté comme tel
-/// dans le pitch. Aucun token n'est créé ici, seulement déplacé.
-pub fn handle_seed_pool(ctx: Context<SeedPool>, amount: u64) -> Result<()> {
+/// dans le pitch. Aucun token n'est créé ici, seulement déplacé. Il va au pool
+/// du jour, partagé par ses publieurs après la clôture.
+pub fn handle_seed_pool(ctx: Context<SeedPool>, day: i64, amount: u64) -> Result<()> {
     require!(amount > 0, ClockInError::InvalidAmount);
+    require!(
+        day == day_of(Clock::get()?.unix_timestamp),
+        ClockInError::DayMismatch
+    );
     let decimals = ctx.accounts.skr_mint.decimals;
     transfer_checked(
         CpiContext::new(
@@ -145,9 +165,10 @@ pub fn handle_seed_pool(ctx: Context<SeedPool>, amount: u64) -> Result<()> {
         amount,
         decimals,
     )?;
-    let config = &mut ctx.accounts.config;
-    config.pool_balance = config
-        .pool_balance
+    let pool = &mut ctx.accounts.day_pool;
+    pool.open(day, ctx.bumps.day_pool);
+    pool.penalties = pool
+        .penalties
         .checked_add(amount)
         .ok_or(ClockInError::InvalidAmount)?;
     Ok(())

@@ -17,7 +17,7 @@ fn anyone_can_settle_a_late_profile_and_feed_the_pool() {
     assert_eq!(profile.staked, 22_500_000_000, "40 SKR décimés deux fois");
     assert_eq!(profile.streak, 0);
     assert_eq!(profile.settled_day, ctx.today() - 1);
-    assert_eq!(ctx.config_state().pool_balance, 17_500_000_000);
+    assert_eq!(ctx.pooled(), 17_500_000_000);
 }
 
 #[test]
@@ -35,11 +35,8 @@ fn reap_then_check_in_the_same_day_does_not_decay_twice() {
     ctx.check_in(&user).unwrap();
 
     let profile = ctx.profile_state(&user.profile);
-    // Aucun decay supplémentaire : seule la récompense, prise dans le pool que
-    // ce même profil vient d'alimenter, s'ajoute.
-    let pool_before_reward = 40 * SKR - after_reap;
-    let expected_reward = (after_reap / 100).min(SKR).min(pool_before_reward);
-    assert_eq!(profile.staked, after_reap + expected_reward);
+    // Aucun decay supplémentaire, et plus de récompense immédiate.
+    assert_eq!(profile.staked, after_reap);
     assert_eq!(profile.streak, 1);
 }
 

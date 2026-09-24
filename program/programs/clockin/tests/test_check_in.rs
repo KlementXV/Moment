@@ -5,7 +5,7 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 
 #[test]
-fn a_check_in_pays_a_capped_reward_and_records_the_commitment() {
+fn a_check_in_records_a_claim_instead_of_paying_a_reward() {
     let mut ctx = Ctx::new();
     ctx.seed_pool(100 * SKR).unwrap();
     let user = ctx.new_user();
@@ -13,14 +13,20 @@ fn a_check_in_pays_a_capped_reward_and_records_the_commitment() {
 
     ctx.check_in(&user).unwrap();
 
+    let today = ctx.today();
     let profile = ctx.profile_state(&user.profile);
-    // 1 % de 50 SKR = 0,5 SKR, sous le plafond de 1 SKR et sous le pool.
-    assert_eq!(profile.staked, 50 * SKR + SKR / 2);
+    // Rien d'immédiat : la part du pool se réclame après sa clôture.
+    assert_eq!(profile.staked, 50 * SKR);
+    assert_eq!(profile.pending_days[0], today);
+    assert_eq!(profile.pending_stakes[0], 50 * SKR);
     assert_eq!(profile.streak, 1);
     assert_eq!(profile.total_checkins, 1);
-    assert_eq!(profile.last_checkin_day, ctx.today());
-    assert_eq!(profile.settled_day, ctx.today());
-    assert_eq!(ctx.config_state().pool_balance, 100 * SKR - SKR / 2);
+    assert_eq!(profile.last_checkin_day, today);
+    assert_eq!(profile.settled_day, today);
+    let pool = ctx.day_pool_state(today).unwrap();
+    assert_eq!(pool.total_stake, 50 * SKR);
+    assert_eq!(pool.winners_count, 1);
+    assert_eq!(pool.penalties, 100 * SKR);
 
     let check_in = ctx.check_in_state(&ctx.check_in_address(&user.pubkey(), ctx.today()));
     assert_eq!(check_in.owner, user.pubkey());
@@ -28,19 +34,6 @@ fn a_check_in_pays_a_capped_reward_and_records_the_commitment() {
     assert_eq!(check_in.commitment, [7u8; 32]);
     assert_eq!(check_in.blob_ref, [9u8; 32]);
     assert_eq!(check_in.streak_at_checkin, 1);
-}
-
-#[test]
-fn an_empty_pool_pays_nothing_but_the_check_in_still_succeeds() {
-    let mut ctx = Ctx::new();
-    let user = ctx.new_user();
-    ctx.stake(&user, 50 * SKR).unwrap();
-
-    ctx.check_in(&user).unwrap();
-
-    let profile = ctx.profile_state(&user.profile);
-    assert_eq!(profile.staked, 50 * SKR, "aucune récompense");
-    assert_eq!(profile.streak, 1, "la boucle sociale n'est jamais bloquée par l'économie");
 }
 
 #[test]

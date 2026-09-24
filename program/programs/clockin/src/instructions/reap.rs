@@ -4,17 +4,21 @@ use crate::{
     constants::*,
     economy::day_of,
     error::ClockInError,
-    state::{Config, Profile},
+    settlement::{settle, PoolAccounts},
+    state::{Config, DayPool, Profile},
 };
 
 #[derive(Accounts)]
+#[instruction(day: i64)]
 pub struct Reap<'info> {
-    /// Instruction permissionless : n'importe qui peut régler un profil en retard.
-    /// Aucun bonus n'est versé à l'appelant en v1 (§6.4).
+    /// Instruction permissionless : n'importe qui peut régler un profil en retard
+    /// ou encaisser pour lui ses parts clôturées. Aucun bonus n'est versé à
+    /// l'appelant (§6.4) ; il paie seulement le pool du jour s'il est à créer.
+    #[account(mut)]
     pub caller: Signer<'info>,
     /// CHECK: propriétaire de la position, lié au profil par `has_one`.
     pub owner: UncheckedAccount<'info>,
-    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,
     #[account(
         mut,
@@ -23,16 +27,36 @@ pub struct Reap<'info> {
         has_one = owner
     )]
     pub profile: Account<'info, Profile>,
+    /// Pool du jour : reçoit les pénalités routées vers aujourd'hui.
+    #[account(
+        init_if_needed,
+        payer = caller,
+        space = 8 + DayPool::INIT_SPACE,
+        seeds = [DAY_POOL_SEED, &day.to_le_bytes()],
+        bump
+    )]
+    pub day_pool: Account<'info, DayPool>,
+    pub system_program: Program<'info, System>,
 }
 
-pub fn handle_reap(ctx: Context<Reap>) -> Result<()> {
-    let today = day_of(Clock::get()?.unix_timestamp);
-    let config = &mut ctx.accounts.config;
-    let profile = &mut ctx.accounts.profile;
-    require!(profile.active, ClockInError::PositionInactive);
+pub fn handle_reap(ctx: Context<Reap>, day: i64) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let today = day_of(now);
+    require!(day == today, ClockInError::DayMismatch);
+    let pools = PoolAccounts::new(ctx.remaining_accounts, ctx.program_id);
+    let accounts = ctx.accounts;
+    accounts.day_pool.open(today, ctx.bumps.day_pool);
+    require!(accounts.profile.active, ClockInError::PositionInactive);
 
-    let bound = profile.settle_bound(today);
-    require!(bound > profile.settled_day, ClockInError::NothingToReap);
-    profile.settle_through(config, bound);
+    let bound = accounts.profile.settle_bound(today);
+    let work = settle(
+        &mut accounts.profile,
+        &accounts.config,
+        &mut accounts.day_pool,
+        &pools,
+        now,
+        bound,
+    )?;
+    require!(work > 0, ClockInError::NothingToReap);
     Ok(())
 }

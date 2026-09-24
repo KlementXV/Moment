@@ -4,7 +4,7 @@ use anchor_spl::token::{mint_to, Mint, MintTo, Token, TokenAccount};
 use crate::{
     constants::*,
     error::ClockInError,
-    state::{Config, Profile},
+    state::{Config, Profile, NO_PENDING_DAY, PENDING_SLOTS},
 };
 
 #[derive(Accounts)]
@@ -35,6 +35,8 @@ pub fn handle_create_profile(ctx: Context<CreateProfile>) -> Result<()> {
     profile.active = false;
     profile.faucet_claimed = false;
     profile.bump = ctx.bumps.profile;
+    profile.pending_days = [NO_PENDING_DAY; PENDING_SLOTS];
+    profile.pending_stakes = [0; PENDING_SLOTS];
     Ok(())
 }
 

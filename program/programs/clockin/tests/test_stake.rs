@@ -44,7 +44,7 @@ fn staking_after_two_missed_days_decays_the_old_balance_only() {
     // 40 SKR décimés trois fois à 25 % = 16,875 SKR, plus 10 SKR intacts.
     let profile = ctx.profile_state(&user.profile);
     assert_eq!(profile.staked, 26_875_000_000);
-    assert_eq!(ctx.config_state().pool_balance, 23_125_000_000);
+    assert_eq!(ctx.pooled(), 23_125_000_000);
     assert_eq!(profile.settled_day, ctx.today() - 1);
     assert_eq!(ctx.vault_balance(), 50 * SKR, "les tokens ne bougent jamais lors d'un decay");
 }

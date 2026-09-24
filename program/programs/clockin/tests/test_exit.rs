@@ -160,8 +160,8 @@ fn the_spec_example_costs_exactly_one_missed_day() {
     assert_eq!(ctx.token_balance(&token_account), 90 * SKR);
     // Le vault n'est pas vide : il garde le pool, soit les 10 SKR que ce même
     // utilisateur vient de perdre et qui appartiennent désormais aux réguliers.
-    assert_eq!(ctx.config_state().pool_balance, 10 * SKR);
-    assert_eq!(ctx.vault_balance(), ctx.config_state().pool_balance);
+    assert_eq!(ctx.pooled(), 10 * SKR);
+    assert_eq!(ctx.vault_balance(), ctx.pooled());
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn checking_in_during_the_wait_costs_nothing_at_all() {
     ctx.finalize_exit(&owner, &token_account).unwrap();
 
     assert_eq!(ctx.token_balance(&token_account), 100 * SKR, "sortie sans perte");
-    assert_eq!(ctx.config_state().pool_balance, 0);
+    assert_eq!(ctx.pooled(), 0);
 }
 
 #[test]
