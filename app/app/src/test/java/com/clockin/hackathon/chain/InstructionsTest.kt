@@ -166,24 +166,20 @@ class InstructionsTest {
     }
 
     @Test
-    fun pool_metas_follow_the_program_rule() {
-        val config = ConfigAccount(
-            admin = ByteArray(32), publicationAuthority = ByteArray(32), skrMint = ByteArray(32),
-            vault = ByteArray(32), minStake = 1, faucetAmount = 1, withdrawalDelaySeconds = 0,
-            poolCloseDelaySeconds = 21_600, decayBps = 1_000, maxDecayDays = 30, faucetEnabled = true,
-        )
-        // Publié le 98, absent le 99.
+    fun pool_metas_never_depend_on_the_clock() {
+        // Publié le 98, absent le 99 : la créance du 98 (lecture) et le pool du 99
+        // (écriture) partent quelle que soit l'heure. Le programme ignore ce dont il
+        // n'a pas besoin ; une clôture pendant le trajet ne fait donc pas échouer.
         val profile = ProfileAccount(
             owner = ByteArray(32), staked = 100, settledDay = 98, lastCheckInDay = 98,
             exitRequestedAt = 0, exitUnlockAt = 0, totalCheckIns = 1, streak = 1,
             active = true, faucetClaimed = true, pendingDays = listOf(98L, -1L), pendingStakes = listOf(100L, 0L),
         )
-        val morning = 100 * 86_400L + 3 * 3_600
-        val metas = DailyPool.poolMetas(programId, profile, config, morning, bound = 99)
+        val metas = DailyPool.poolMetas(programId, profile, bound = 99)
         assertEquals(listOf(ClockInAddresses.dayPool(programId, 98), ClockInAddresses.dayPool(programId, 99)), metas.map { it.publicKey })
         assertEquals(listOf(false, true), metas.map { it.isWritable })
-        // Après 06:00, le pool du 99 est clôturé : on ne le passe plus.
-        val later = DailyPool.poolMetas(programId, profile, config, morning + 4 * 3_600, bound = 99)
-        assertEquals(listOf(ClockInAddresses.dayPool(programId, 98)), later.map { it.publicKey })
+        // Rien de manqué : seules les créances.
+        val upToDate = DailyPool.poolMetas(programId, profile.copy(settledDay = 99), bound = 99)
+        assertEquals(listOf(ClockInAddresses.dayPool(programId, 98)), upToDate.map { it.publicKey })
     }
 }

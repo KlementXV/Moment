@@ -21,19 +21,16 @@ object DailyPool {
     fun settleBound(profile: ProfileAccount, today: Long): Long =
         if (profile.exitUnlockAt > 0) minOf(today - 1, Math.floorDiv(profile.exitUnlockAt, DAY) - 1) else today - 1
 
-    /** Comptes restants d'une instruction qui règle ce profil jusqu'à `bound`. */
-    fun poolMetas(
-        programId: SolanaPublicKey,
-        profile: ProfileAccount?,
-        config: ConfigAccount?,
-        now: Long,
-        bound: Long,
-    ): List<AccountMeta> {
-        if (profile == null || config == null) return emptyList()
-        val delay = config.poolCloseDelaySeconds
-        val claims = profile.pendingDays.filter { it != NO_DAY && now >= closesAt(it, delay) }
+    /** Comptes restants d'une instruction qui règle ce profil jusqu'à `bound` :
+     * toutes les créances (lecture) et le jour borne s'il est manqué (écriture).
+     * Sans filtre horaire : le programme ignore ceux dont il n'a pas besoin, et
+     * l'horloge de l'appareil ou une clôture pendant le trajet (signature
+     * wallet, co-signature serveur) ne peuvent pas faire échouer la transaction. */
+    fun poolMetas(programId: SolanaPublicKey, profile: ProfileAccount?, bound: Long): List<AccountMeta> {
+        if (profile == null) return emptyList()
+        val claims = profile.pendingDays.filter { it != NO_DAY }
             .map { AccountMeta(ClockInAddresses.dayPool(programId, it), false, false) }
-        val penalty = if (profile.active && bound > profile.settledDay && now < closesAt(bound, delay))
+        val penalty = if (profile.active && bound > profile.settledDay)
             listOf(AccountMeta(ClockInAddresses.dayPool(programId, bound), false, true)) else emptyList()
         return claims + penalty
     }

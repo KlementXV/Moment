@@ -190,3 +190,34 @@ fn a_day_without_publishers_pays_nobody() {
             .sum::<u64>();
     assert!(ctx.vault_balance() >= owed);
 }
+
+#[test]
+fn a_claim_that_closes_while_the_transaction_is_in_flight_still_settles() {
+    // Comptes choisis à 05:59:50, transaction exécutée à 06:00:10 : la créance
+    // de la veille est devenue réclamable entre-temps.
+    let mut ctx = ctx();
+    let (a, _b, c, d1) = three_members_one_absent(&mut ctx);
+    ctx.warp_to_next(5 * 60);
+    ctx.reap(&c.pubkey()).unwrap();
+
+    ctx.warp_to_next(6 * HOUR - 10);
+    let pools = ctx.honest_pools(&a.pubkey());
+    ctx.warp_seconds(20);
+    let today = ctx.today();
+    ctx.reap_with(&a.pubkey(), today, pools).unwrap();
+    assert_eq!(ctx.profile_state(&a.profile).staked, 105 * SKR);
+    assert!(ctx.profile_state(&a.profile).pending_days.iter().all(|d| *d != d1));
+}
+
+#[test]
+fn a_client_clock_ahead_of_the_chain_still_routes_the_penalty() {
+    // L'appareil avance : il croit le pool d'hier clôturé, la chaîne non.
+    let mut ctx = ctx();
+    let (_a, _b, c, d1) = three_members_one_absent(&mut ctx);
+    ctx.warp_to_next(6 * HOUR + 10);
+    let pools = ctx.honest_pools(&c.pubkey());
+    ctx.warp_seconds(-20);
+    let today = ctx.today();
+    ctx.reap_with(&c.pubkey(), today, pools).unwrap();
+    assert_eq!(ctx.day_pool_state(d1).unwrap().penalties, 10 * SKR);
+}

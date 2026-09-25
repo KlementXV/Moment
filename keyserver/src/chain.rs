@@ -64,16 +64,18 @@ impl Profile {
             .map(|i| (self.pending_days[i], self.pending_stakes[i]))
             .collect()
     }
-    /// Pools a settling instruction must carry, as `(day, writable)`: closed
-    /// claims (read) and the last missed day while its pool is open (written).
-    pub fn settlement_pools(&self, config: &Config, now: i64, bound: i64) -> Vec<(i64, bool)> {
+    /// Pools a settling instruction carries, as `(day, writable)`: every claim
+    /// (read) and the settle bound while a day is missed (written). No clock
+    /// filter: the program ignores what it does not need, and a pool closing
+    /// while the transaction is in flight must not make it fail.
+    pub fn settlement_pools(&self, bound: i64) -> Vec<(i64, bool)> {
         let mut pools: Vec<(i64, bool)> = self
-            .closed_claims(config, now)
-            .into_iter()
-            .map(|(day, _)| (day, false))
+            .pending_days
+            .iter()
+            .filter(|day| **day >= 0)
+            .map(|day| (*day, false))
             .collect();
-        if self.active && bound > self.settled_day && now < closes_at(bound, config.pool_close_delay)
-        {
+        if self.active && bound > self.settled_day {
             pools.push((bound, true));
         }
         pools
@@ -857,18 +859,17 @@ mod tests {
         );
     }
     #[test]
-    fn settlement_pools_follow_the_program_rule() {
-        let c = pool_config();
+    fn settlement_pools_never_depend_on_the_clock() {
         let mut p = pool_profile();
-        // Published on 98, absent on 99.
+        // Published on 98 and 99 (99 still open), then nothing to settle.
+        assert_eq!(p.settlement_pools(99), vec![(98, false), (99, false)]);
+        // Published on 98, absent on 99: the pool of 99 rides along writable even
+        // if it may have closed by the time the transaction lands.
         p.settled_day = 98;
         p.pending_days = [98, -1];
-        // Day 100 at 03:00: 98 closed (read), 99 missed and still open (written).
-        let now = 100 * 86_400 + 3 * 3_600;
-        assert_eq!(p.settlement_pools(&c, now, 99), vec![(98, false), (99, true)]);
-        // After 06:00 the pool of 99 is closed and no longer passed.
-        let now = 100 * 86_400 + 7 * 3_600;
-        assert_eq!(p.settlement_pools(&c, now, 99), vec![(98, false)]);
+        assert_eq!(p.settlement_pools(99), vec![(98, false), (99, true)]);
+        p.active = false;
+        assert_eq!(p.settlement_pools(99), vec![(98, false)]);
     }
     #[test]
     fn needs_reap_when_late_or_when_a_claim_closed() {

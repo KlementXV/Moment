@@ -442,9 +442,9 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
-    /** Pools de règlement exigés par le programme, calculés sur le dernier état lu. */
+    /** Pools de règlement du programme, calculés sur le dernier profil lu. */
     private fun settlementPools(bound: Long): List<AccountMeta> =
-        DailyPool.poolMetas(programId, state.profile, state.config, Instant.now().epochSecond, bound)
+        DailyPool.poolMetas(programId, state.profile, bound)
 
     /** Publication exclusively authorized by the backend; retries reuse the durable encrypted packet. */
     fun publish(reviewAcknowledged: Boolean = false, caption: String = "", onSuccess: () -> Unit) {

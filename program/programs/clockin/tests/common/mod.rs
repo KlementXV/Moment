@@ -13,7 +13,7 @@ use {
         AccountDeserialize, InstructionData, ToAccountMetas,
     },
     clockin::{
-        economy::{pool_closes_at, settle_bound},
+        economy::settle_bound,
         state::{CheckIn, Config, DayPool, Profile},
     },
     litesvm::{types::TransactionResult, LiteSVM},
@@ -385,19 +385,20 @@ impl Ctx {
     }
 
     /// Comptes restants qu'un client honnête joint pour régler jusqu'à `bound`.
+    /// Sans filtre horaire : toutes les créances (lecture) et le jour borne
+    /// (écriture). Le programme ignore ceux dont il n'a pas besoin, et une
+    /// clôture survenue pendant le trajet de la transaction ne la fait pas échouer.
     pub fn pool_metas(&self, owner: &Pubkey, bound: i64) -> Vec<AccountMeta> {
         let Some(profile) = self.stored_profile(owner) else {
             return vec![];
         };
-        let now = self.now();
-        let delay = self.config_state().pool_close_delay_seconds;
         let mut metas: Vec<AccountMeta> = profile
             .pending_days
             .iter()
-            .filter(|day| **day >= 0 && now >= pool_closes_at(**day, delay))
+            .filter(|day| **day >= 0)
             .map(|day| AccountMeta::new_readonly(self.day_pool_address(*day), false))
             .collect();
-        if profile.active && bound > profile.settled_day && now < pool_closes_at(bound, delay) {
+        if profile.active && bound > profile.settled_day {
             metas.push(AccountMeta::new(self.day_pool_address(bound), false));
         }
         metas
