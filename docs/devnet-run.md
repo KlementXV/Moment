@@ -101,7 +101,10 @@ qu'aux publieurs de ce jour-là.
 `CRANK_KEYPAIR` pointe vers un fichier de clé Solana (tableau JSON de 64 octets),
 **distinct** de `PUBLICATION_AUTHORITY_KEYPAIR`, approvisionné en SOL : il paie
 les frais de `reap` et la rente des `DayPool` qu'il crée. Sans cette variable, le
-crank est désactivé (log `Crank reap désactivé`).
+crank est désactivé (log `Crank reap désactivé`). Il passe à 00:05 UTC puis
+toutes les 15 min jusqu'à la clôture de la veille + 5 min : un passage raté est
+repris tant que le pool de la veille est ouvert, sinon ses pénalités iraient au
+pool du jour.
 
 ### Vérification de bout en bout
 

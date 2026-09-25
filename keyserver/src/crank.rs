@@ -3,14 +3,18 @@
 use crate::{
     chain::{self, Config, Profile, RpcChain, DAY},
     error::Result,
-    protocol::Key,
+    protocol::{self, Key},
 };
 use async_trait::async_trait;
 use ed25519_dalek::{Signer, SigningKey};
 use std::sync::Arc;
 
-/// Five minutes after midnight (late profiles), five minutes after closure (payouts).
+/// First pass five minutes after midnight (late profiles), last pass five
+/// minutes after the previous day's pool closes (payouts).
 const MARGIN: i64 = 300;
+/// Retry cadence in between: a failed or partial midnight pass must be retried
+/// while yesterday's pool is still open, or its penalties go to today's pool.
+const RETRY: i64 = 900;
 
 #[async_trait]
 pub trait CrankChain: Send + Sync {
@@ -24,7 +28,14 @@ pub fn next_run(now: i64, close_delay: i64) -> i64 {
     let today = now.div_euclid(DAY);
     [today, today + 1]
         .iter()
-        .flat_map(|day| [day * DAY + MARGIN, day * DAY + close_delay + MARGIN])
+        .flat_map(|day| {
+            let start = day * DAY + MARGIN;
+            let last = day * DAY + close_delay + MARGIN;
+            (0..)
+                .map(move |k| start + k * RETRY)
+                .take_while(move |at| *at < last)
+                .chain(std::iter::once(last))
+        })
         .filter(|at| *at > now)
         .min()
         .expect("tomorrow is always ahead")
@@ -76,26 +87,34 @@ pub struct CrankReport {
     pub failed: usize,
 }
 
-/// Idempotent: a profile with nothing to reap is skipped, and a failed send
-/// is retried at the next run.
+/// Idempotent: a profile with nothing to reap is skipped, so the next pass
+/// (at most `RETRY` later while yesterday's pool is open) picks up failures.
 pub async fn crank_once(chain: &dyn CrankChain, program: &Key, signer: &SigningKey, now: i64) -> Result<CrankReport> {
     let config = chain.config().await?;
     let today = now.div_euclid(DAY);
     let payer = signer.verifying_key().to_bytes();
     let mut report = CrankReport::default();
     let mut blockhash = chain.latest_blockhash().await?;
-    for (n, profile) in chain.profiles().await?.into_iter().enumerate() {
+    for profile in chain.profiles().await? {
         if profile.owner == payer || !profile.needs_reap(&config, now) {
             continue;
         }
-        if n > 0 && n % 100 == 0 {
-            blockhash = chain.latest_blockhash().await?;
+        let sent = report.sent + report.failed;
+        if sent > 0 && sent % 100 == 0 {
+            // A blockhash stays valid for about a minute; a failed refresh keeps
+            // the previous one rather than dropping the remaining profiles.
+            if let Ok(fresh) = chain.latest_blockhash().await {
+                blockhash = fresh;
+            }
         }
-        let pools = profile.settlement_pools(&config, now, profile.settle_bound(today));
+        let pools = profile.settlement_pools(profile.settle_bound(today));
         let raw = reap_transaction(program, signer, &profile.owner, today, &pools, &blockhash);
         match chain.send_transaction(&raw).await {
             Ok(()) => report.sent += 1,
-            Err(_) => report.failed += 1,
+            Err(_) => {
+                report.failed += 1;
+                tracing::warn!(owner = %protocol::address_string(&profile.owner), "crank reap: send failed");
+            }
         }
     }
     Ok(report)
@@ -131,11 +150,17 @@ mod tests {
     use std::sync::Mutex;
 
     #[test]
-    fn runs_after_midnight_then_after_closure() {
+    fn retries_every_quarter_hour_until_the_previous_pool_closes() {
         let day = 100 * 86_400;
         assert_eq!(next_run(day, 21_600), day + 300);
-        assert_eq!(next_run(day + 300, 21_600), day + 21_600 + 300);
-        assert_eq!(next_run(day + 21_600 + 300, 21_600), day + 86_400 + 300);
+        assert_eq!(next_run(day + 300, 21_600), day + 1_200);
+        assert_eq!(next_run(day + 20_000, 21_600), day + 20_100);
+        // Last pass at closure + margin, then the next midnight.
+        assert_eq!(next_run(day + 21_000, 21_600), day + 21_900);
+        assert_eq!(next_run(day + 21_900, 21_600), day + 86_400 + 300);
+        // A closure off the quarter-hour grid still gets its own pass.
+        assert_eq!(next_run(day + 3_000, 3_600), day + 3_900);
+        assert_eq!(next_run(day + 3_900, 3_600), day + 86_400 + 300);
     }
 
     #[test]
@@ -176,6 +201,55 @@ mod tests {
             self.sent.lock().unwrap().push(raw.to_vec());
             Ok(())
         }
+    }
+
+    /// Every profile is late; the blockhash RPC answers once, then fails.
+    struct FlakyBlockhash {
+        late: usize,
+        blockhash_calls: std::sync::atomic::AtomicUsize,
+        sent: std::sync::atomic::AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl CrankChain for FlakyBlockhash {
+        async fn config(&self) -> Result<Config> {
+            Ok(Config { authority: [0; 32], min_stake: 1, decay_bps: 1000, max_decay_days: 30, pool_close_delay: 21_600 })
+        }
+        async fn profiles(&self) -> Result<Vec<Profile>> {
+            Ok((0..self.late)
+                .map(|i| Profile {
+                    owner: [(i % 250) as u8 + 1, (i / 250) as u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    staked: 100, settled_day: 99, exit_unlock_at: 0, active: true,
+                    pending_days: [-1, -1], pending_stakes: [0, 0],
+                })
+                .collect())
+        }
+        async fn latest_blockhash(&self) -> Result<Key> {
+            use std::sync::atomic::Ordering;
+            if self.blockhash_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                Ok([6; 32])
+            } else {
+                Err(crate::error::Error::unavailable())
+            }
+        }
+        async fn send_transaction(&self, _raw: &[u8]) -> Result<()> {
+            self.sent.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_blockhash_refresh_does_not_drop_the_remaining_profiles() {
+        let chain = FlakyBlockhash {
+            late: 250,
+            blockhash_calls: Default::default(),
+            sent: Default::default(),
+        };
+        let now = 101 * 86_400 + 300;
+        let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now)
+            .await
+            .unwrap();
+        assert_eq!((report.sent, report.failed), (250, 0));
     }
 
     #[tokio::test]

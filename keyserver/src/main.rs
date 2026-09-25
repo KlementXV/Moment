@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
     match settings.crank {
         Some(signer) => {
             tokio::spawn(moment_keyserver::crank::run(crank_chain, settings.program, signer));
-            tracing::info!("Crank reap actif (00:05 et clôture + 5 min UTC)");
+            tracing::info!("Crank reap actif (toutes les 15 min de 00:05 à clôture + 5 min UTC)");
         }
         None => tracing::info!("Crank reap désactivé : CRANK_KEYPAIR absent"),
     }
