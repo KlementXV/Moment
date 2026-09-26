@@ -58,6 +58,14 @@ pub mod clockin {
         instructions::check_in::handle_check_in(ctx, day, commitment, blob_ref)
     }
 
+    pub fn open_day_pool(ctx: Context<OpenDayPool>, day: i64) -> Result<()> {
+        instructions::day_pool::handle_open_day_pool(ctx, day)
+    }
+
+    pub fn roll_over_day_pool(ctx: Context<RollOverDayPool>, day: i64, from_day: i64) -> Result<()> {
+        instructions::day_pool::handle_roll_over_day_pool(ctx, day, from_day)
+    }
+
     pub fn close_check_in(ctx: Context<CloseCheckIn>, day: i64) -> Result<()> {
         instructions::close_check_in::handle_close_check_in(ctx, day)
     }

@@ -114,10 +114,14 @@ pub fn check_in_closable(check_in_day: i64, today: i64) -> bool {
     check_in_day <= today - 2
 }
 
+/// Délai minimal de clôture : le crank passe à 00:05 puis toutes les 15 min et
+/// doit pouvoir régler les absents (et réessayer) avant que le pool se ferme.
+pub const MIN_CLOSE_DELAY: i64 = 3_600;
+
 /// La clôture doit tomber avant la fin du lendemain : c'est ce qui borne à deux
 /// le nombre de créances ouvertes d'un profil.
 pub fn valid_close_delay(delay: i64) -> bool {
-    (0..DAY_SECONDS).contains(&delay)
+    (MIN_CLOSE_DELAY..DAY_SECONDS).contains(&delay)
 }
 
 #[cfg(test)]
@@ -280,7 +284,11 @@ mod tests {
 
     #[test]
     fn the_close_delay_must_stay_within_a_day() {
-        assert!(valid_close_delay(0));
+        // Au moins une heure : le crank passe à 00:05 puis toutes les 15 min, il
+        // doit pouvoir régler les absents (et réessayer) avant la clôture.
+        assert!(!valid_close_delay(0));
+        assert!(!valid_close_delay(3_599));
+        assert!(valid_close_delay(3_600));
         assert!(valid_close_delay(21_600));
         assert!(valid_close_delay(DAY_SECONDS - 1));
         assert!(!valid_close_delay(DAY_SECONDS));

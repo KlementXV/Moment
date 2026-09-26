@@ -81,9 +81,10 @@ impl Profile {
         pools
     }
     /// A late day to settle or a closed claim to pay out: `reap` would succeed.
+    /// A zero balance loses nothing: settling it would only cost fees.
     pub fn needs_reap(&self, config: &Config, now: i64) -> bool {
         self.active
-            && (self.settle_bound(now.div_euclid(DAY)) > self.settled_day
+            && ((self.staked > 0 && self.settle_bound(now.div_euclid(DAY)) > self.settled_day)
                 || !self.closed_claims(config, now).is_empty())
     }
     /// `gains` are the closed claims, credited by the program before the decay.
@@ -549,6 +550,27 @@ impl crate::crank::CrankChain for RpcChain {
             .ok_or_else(Error::unavailable)?;
         protocol::address(hash).map_err(|_| Error::unavailable())
     }
+    async fn day_pools(&self) -> Result<Vec<DayPool>> {
+        let filters = json!([
+            {"dataSize": DAY_POOL_LEN},
+            {"memcmp": {"offset": 0, "bytes": bs58::encode(discriminator("account:DayPool")).into_string()}}
+        ]);
+        let result = self
+            .rpc_limited(
+                "getProgramAccounts",
+                json!([protocol::address_string(&self.program), {"encoding":"base64","commitment":"confirmed","filters":filters}]),
+                PROFILES_MAX_BYTES,
+            )
+            .await?;
+        let entries = result.as_array().ok_or_else(Error::unavailable)?;
+        Ok(entries
+            .iter()
+            .filter_map(|entry| entry["account"]["data"][0].as_str())
+            .filter_map(|data| protocol::unbase64(data, DAY_POOL_LEN).ok())
+            .filter_map(|bytes| decode_day_pool(&bytes).ok())
+            .map(|(pool, _)| pool)
+            .collect())
+    }
     async fn check_ins(&self) -> Result<Vec<(Key, i64)>> {
         // Only owner and day (bytes 8..48): the answer stays small.
         let filters = json!([
@@ -911,6 +933,18 @@ mod tests {
         assert!(!p.needs_reap(&c, 101 * 86_400 + 60));
     }
     #[test]
+    fn a_zero_balance_profile_is_not_reaped_for_nothing() {
+        // Sa pénalité vaut zéro : un reap ne ferait que payer des frais.
+        let c = pool_config();
+        let mut p = pool_profile();
+        p.pending_days = [-1, -1];
+        p.staked = 0;
+        assert!(!p.needs_reap(&c, 101 * 86_400 + 60));
+        // Une part clôturée à encaisser justifie toujours le reap.
+        p.pending_days = [99, -1];
+        assert!(p.needs_reap(&c, 101 * 86_400 + 60));
+    }
+    #[test]
     fn closed_gains_count_towards_eligibility() {
         let c = pool_config();
         let mut p = pool_profile();
@@ -1030,6 +1064,19 @@ mod tests {
         let profiles = chain.profiles().await.unwrap();
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].owner, [5; 32]);
+        task.abort();
+    }
+    #[tokio::test]
+    async fn crank_lists_day_pools_and_skips_unreadable_ones() {
+        use crate::crank::CrankChain;
+        let (chain, task) = mock_rpc(json!({"result": [
+            {"pubkey": "x", "account": {"data": [protocol::b64(&layout("day_pool")), "base64"]}},
+            {"pubkey": "y", "account": {"data": [protocol::b64(&[1, 2, 3]), "base64"]}},
+        ]}))
+        .await;
+        let pools = chain.day_pools().await.unwrap();
+        assert_eq!(pools.len(), 1);
+        assert_eq!((pools[0].day, pools[0].penalties), (20_718, 30_000_000_000));
         task.abort();
     }
     #[tokio::test]

@@ -92,6 +92,12 @@ pub struct UpdateConfig<'info> {
 pub fn handle_update_config(ctx: Context<UpdateConfig>, params: ConfigParams) -> Result<()> {
     params.validate()?;
     let config = &mut ctx.accounts.config;
+    // Figé au déploiement : le changer rouvrirait des pools déjà en partie
+    // réclamés, ou fermerait tôt des pools ouverts.
+    require!(
+        params.pool_close_delay_seconds == config.pool_close_delay_seconds,
+        ClockInError::InvalidConfigParam
+    );
     config.min_stake = params.min_stake;
     config.faucet_amount = params.faucet_amount;
     config.withdrawal_delay_seconds = params.withdrawal_delay_seconds;

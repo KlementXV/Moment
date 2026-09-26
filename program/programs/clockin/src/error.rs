@@ -38,4 +38,8 @@ pub enum ClockInError {
     ClaimStillOpen,
     #[msg("Ce check-in est encore lu par le serveur : fermeture possible à partir de J+2")]
     CheckInTooRecent,
+    #[msg("Ce pool n'est pas encore clôturé")]
+    PoolStillOpen,
+    #[msg("Rien à reporter : pool vide ou partagé par ses publieurs")]
+    NothingToRollOver,
 }

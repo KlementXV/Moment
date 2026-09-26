@@ -540,6 +540,46 @@ impl Ctx {
         self.send(&[instruction], &[&admin])
     }
 
+    /// Crée le pool du jour ; l'admin joue le crank qui paie la rente.
+    pub fn open_day_pool(&mut self) -> TransactionResult {
+        let day = self.today();
+        self.open_day_pool_on(day)
+    }
+
+    pub fn open_day_pool_on(&mut self, day: i64) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::OpenDayPool {
+                caller: self.admin.pubkey(),
+                day_pool: self.day_pool_address(day),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::OpenDayPool { day }.data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
+    /// Reporte le pool clôturé et sans publieur de `from_day` sur celui du jour.
+    pub fn roll_over(&mut self, from_day: i64) -> TransactionResult {
+        let day = self.today();
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::RollOverDayPool {
+                caller: self.admin.pubkey(),
+                config: self.config,
+                from_pool: self.day_pool_address(from_day),
+                day_pool: self.day_pool_address(day),
+                system_program: system_program::ID,
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::RollOverDayPool { day, from_day }.data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
     /// Fermeture d'un check-in passé, déclenchée par un tiers (l'admin).
     pub fn close_check_in(&mut self, owner: &Pubkey, day: i64) -> TransactionResult {
         self.close_check_in_to(owner, owner, day)

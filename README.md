@@ -117,7 +117,12 @@ réclamable après sa clôture (D+1 06:00 UTC). Le keyserver lance `reap` à 00:
 
 Instructions : `initialize_config`, `update_config`, `set_publication_authority`,
 `seed_pool`, `create_profile`, `faucet`, `stake`, `check_in`, `close_check_in`, `reap`,
-`request_exit`, `cancel_exit`, `finalize_exit`.
+`open_day_pool`, `roll_over_day_pool`, `request_exit`, `cancel_exit`, `finalize_exit`.
+
+`open_day_pool` crée le pool du jour (le crank le fait à 00:05 : le premier
+publieur ne paie plus sa rente). `roll_over_day_pool` reverse un pool clôturé
+sans aucun publieur (amorçage ou pénalités) dans le pool du jour, au lieu de le
+laisser bloqué. Le délai de clôture est d'au moins 1 h et figé au déploiement.
 
 `close_check_in` (permissionless, à partir de J+2) ferme un `CheckIn` que plus rien
 ne relit et rend sa rente (≈ 0,0013 SOL) à son propriétaire ; le crank du keyserver

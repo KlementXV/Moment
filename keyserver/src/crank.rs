@@ -1,7 +1,7 @@
 //! Daily crank: settles late profiles and pays out closed pools.
 //! Permissionless on-chain; this server only pays the fees.
 use crate::{
-    chain::{self, Config, Profile, RpcChain, DAY},
+    chain::{self, Config, DayPool, Profile, RpcChain, DAY},
     error::Result,
     protocol::{self, Key},
 };
@@ -24,6 +24,10 @@ pub trait CrankChain: Send + Sync {
     async fn send_transaction(&self, raw: &[u8]) -> Result<()>;
     /// Every `CheckIn` as `(owner, day)`.
     async fn check_ins(&self) -> Result<Vec<(Key, i64)>> {
+        Ok(vec![])
+    }
+    /// Every `DayPool`.
+    async fn day_pools(&self) -> Result<Vec<DayPool>> {
         Ok(vec![])
     }
 }
@@ -112,6 +116,46 @@ pub fn reap_transaction(
     signed_message(caller, &[(*program, accounts, instruction_data("reap", day))], blockhash)
 }
 
+/// Creates today's pool if needed (its first publisher then pays no rent for
+/// it), and rolls each orphan closed pool (no publisher, something inside)
+/// over to today's pool instead of leaving it stuck in the vault.
+pub fn open_and_roll_over_transaction(
+    program: &Key,
+    caller: &SigningKey,
+    today: i64,
+    open: bool,
+    from_days: &[i64],
+    blockhash: &Key,
+) -> Vec<u8> {
+    let payer = caller.verifying_key().to_bytes();
+    let pool = |day: i64| chain::pda(program, &[b"day_pool", &day.to_le_bytes()]).0;
+    let config = chain::pda(program, &[b"config"]).0;
+    let mut instructions: Vec<Ix> = Vec::new();
+    if open {
+        instructions.push((
+            *program,
+            vec![(payer, true), (pool(today), true), ([0; 32], false)],
+            instruction_data("open_day_pool", today),
+        ));
+    }
+    for from_day in from_days {
+        let mut data = instruction_data("roll_over_day_pool", today);
+        data.extend_from_slice(&from_day.to_le_bytes());
+        instructions.push((
+            *program,
+            vec![
+                (payer, true),
+                (config, false),
+                (pool(*from_day), true),
+                (pool(today), true),
+                ([0; 32], false),
+            ],
+            data,
+        ));
+    }
+    signed_message(caller, &instructions, blockhash)
+}
+
 /// Check-ins closed per transaction: 8 × 2 keys stay well under 1 232 bytes.
 const CLOSES_PER_TRANSACTION: usize = 8;
 
@@ -143,6 +187,10 @@ pub struct CrankReport {
     pub failed: usize,
     /// Check-ins closed, their rent returned to their owners.
     pub closed: usize,
+    /// Today's pool created by the crank.
+    pub opened: bool,
+    /// Orphan pools rolled over to today's pool.
+    pub rolled_over: usize,
 }
 
 /// Idempotent: a profile with nothing to reap is skipped, so the next pass
@@ -153,6 +201,7 @@ pub async fn crank_once(chain: &dyn CrankChain, program: &Key, signer: &SigningK
     let payer = signer.verifying_key().to_bytes();
     let mut report = CrankReport::default();
     let mut blockhash = chain.latest_blockhash().await?;
+    maintain_pools(chain, program, signer, &config, now, blockhash, &mut report).await;
     for profile in chain.profiles().await? {
         if profile.owner == payer || !profile.needs_reap(&config, now) {
             continue;
@@ -177,6 +226,55 @@ pub async fn crank_once(chain: &dyn CrankChain, program: &Key, signer: &SigningK
     }
     close_old_check_ins(chain, program, signer, today, blockhash, &mut report).await;
     Ok(report)
+}
+
+/// Rolls over at most this many pools per transaction (5 accounts each, shared).
+const ROLL_OVERS_PER_TRANSACTION: usize = 8;
+
+/// Best effort, before the reaps: what fails is picked up by the next pass.
+async fn maintain_pools(
+    chain: &dyn CrankChain,
+    program: &Key,
+    signer: &SigningKey,
+    config: &Config,
+    now: i64,
+    blockhash: Key,
+    report: &mut CrankReport,
+) {
+    let Ok(pools) = chain.day_pools().await else {
+        tracing::warn!("crank pools: day pools unavailable");
+        return;
+    };
+    let today = now.div_euclid(DAY);
+    let open = !pools.iter().any(|pool| pool.day == today);
+    let orphans: Vec<i64> = pools
+        .iter()
+        .filter(|pool| {
+            pool.day < today
+                && pool.total_stake == 0
+                && pool.penalties > 0
+                && now >= chain::closes_at(pool.day, config.pool_close_delay)
+        })
+        .map(|pool| pool.day)
+        .collect();
+    let mut batches: Vec<&[i64]> = orphans.chunks(ROLL_OVERS_PER_TRANSACTION).collect();
+    if batches.is_empty() && open {
+        batches.push(&[]);
+    }
+    for (n, batch) in batches.into_iter().enumerate() {
+        let open_now = open && n == 0;
+        let raw = open_and_roll_over_transaction(program, signer, today, open_now, batch, &blockhash);
+        match chain.send_transaction(&raw).await {
+            Ok(()) => {
+                report.opened |= open_now;
+                report.rolled_over += batch.len();
+            }
+            Err(_) => {
+                report.failed += 1;
+                tracing::warn!(count = batch.len(), "crank pools: send failed");
+            }
+        }
+    }
 }
 
 /// Returns the rent of check-ins nobody reads anymore (from D+2) to their owners.
@@ -228,6 +326,8 @@ pub async fn run(chain: Arc<RpcChain>, program: Key, signer: SigningKey) {
             Ok(report) => tracing::info!(
                 sent = report.sent,
                 closed = report.closed,
+                opened = report.opened,
+                rolled_over = report.rolled_over,
                 failed = report.failed,
                 "crank reap"
             ),
@@ -239,7 +339,7 @@ pub async fn run(chain: Arc<RpcChain>, program: Key, signer: SigningKey) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::chain::{Config, Profile};
+    use crate::chain::{Config, DayPool, Profile};
     use std::sync::Mutex;
 
     #[test]
@@ -305,7 +405,34 @@ mod tests {
         assert_eq!(&ix[15..23], &98i64.to_le_bytes());
     }
 
-    struct Fake { profiles: Vec<Profile>, check_ins: Vec<(Key, i64)>, sent: Mutex<Vec<Vec<u8>>> }
+    #[test]
+    fn opening_and_rolling_over_pools_are_signed_transactions() {
+        let program = [9; 32];
+        let caller = SigningKey::from_bytes(&[3; 32]);
+        let raw = open_and_roll_over_transaction(&program, &caller, 101, true, &[98, 99], &[6; 32]);
+        let message = &raw[65..];
+        crate::protocol::verify(&caller.verifying_key().to_bytes(), message, &raw[1..65]).unwrap();
+        let pool = |d: i64| crate::chain::pda(&program, &[b"day_pool", &d.to_le_bytes()]).0;
+        // caller, pool du jour, pools 98 et 99 écrits ; system, config, programme en lecture.
+        assert_eq!(&message[..4], &[1, 0, 3, 7]);
+        let key = |i: usize| &message[4 + 32 * i..4 + 32 * (i + 1)];
+        assert_eq!(key(1), &pool(101));
+        assert_eq!(key(2), &pool(98));
+        assert_eq!(key(3), &pool(99));
+        let ix = &message[4 + 32 * 7 + 32..];
+        assert_eq!(ix[0], 3, "open_day_pool puis deux reports");
+        assert_eq!(&ix[1..6], &[6, 3, 0, 1, 4]);
+        assert_eq!(ix[6], 16);
+        assert_eq!(&ix[7..15], &crate::chain::discriminator("global:open_day_pool"));
+        let second = &ix[23..];
+        assert_eq!(&second[..7], &[6, 5, 0, 5, 2, 1, 4]);
+        assert_eq!(second[7], 24);
+        assert_eq!(&second[8..16], &crate::chain::discriminator("global:roll_over_day_pool"));
+        assert_eq!(&second[16..24], &101i64.to_le_bytes());
+        assert_eq!(&second[24..32], &98i64.to_le_bytes());
+    }
+
+    struct Fake { profiles: Vec<Profile>, check_ins: Vec<(Key, i64)>, pools: Vec<DayPool>, sent: Mutex<Vec<Vec<u8>>> }
     #[async_trait::async_trait]
     impl CrankChain for Fake {
         async fn config(&self) -> Result<Config> {
@@ -313,6 +440,7 @@ mod tests {
         }
         async fn profiles(&self) -> Result<Vec<Profile>> { Ok(self.profiles.clone()) }
         async fn check_ins(&self) -> Result<Vec<(Key, i64)>> { Ok(self.check_ins.clone()) }
+        async fn day_pools(&self) -> Result<Vec<DayPool>> { Ok(self.pools.clone()) }
         async fn latest_blockhash(&self) -> Result<Key> { Ok([6; 32]) }
         async fn send_transaction(&self, raw: &[u8]) -> Result<()> {
             self.sent.lock().unwrap().push(raw.to_vec());
@@ -383,10 +511,47 @@ mod tests {
                 profile(3, 99, -1, false),  // position fermée
             ],
             check_ins: vec![],
+            pools: vec![DayPool { day: 101, penalties: 0, total_stake: 0 }],
             sent: Mutex::new(vec![]),
         };
         let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now).await.unwrap();
         assert_eq!((report.sent, report.failed), (1, 0));
+    }
+
+    #[tokio::test]
+    async fn todays_pool_is_opened_and_orphan_closed_pools_roll_over() {
+        let now = 101 * 86_400 + 7 * 3_600; // jour 101, après la clôture du 100
+        let pool = |day, penalties, total_stake| DayPool { day, penalties, total_stake };
+        let chain = Fake {
+            profiles: vec![],
+            check_ins: vec![],
+            pools: vec![
+                pool(99, 20, 0),   // orphelin clôturé : reporté
+                pool(100, 5, 0),   // orphelin clôturé : reporté
+                pool(98, 30, 300), // partagé par ses publieurs : jamais touché
+                pool(97, 0, 0),    // vide : rien à reporter
+            ],
+            sent: Mutex::new(vec![]),
+        };
+        let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now).await.unwrap();
+        assert!(report.opened, "pool du jour absent : créé par le crank");
+        assert_eq!(report.rolled_over, 2);
+        assert_eq!(chain.sent.lock().unwrap().len(), 1, "une seule transaction");
+    }
+
+    #[tokio::test]
+    async fn a_pool_still_open_is_not_rolled_over() {
+        let now = 101 * 86_400 + 3 * 3_600; // jour 101, 03:00 : le 100 est ouvert
+        let chain = Fake {
+            profiles: vec![],
+            check_ins: vec![],
+            pools: vec![DayPool { day: 101, penalties: 0, total_stake: 0 }, DayPool { day: 100, penalties: 5, total_stake: 0 }],
+            sent: Mutex::new(vec![]),
+        };
+        let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now).await.unwrap();
+        assert!(!report.opened);
+        assert_eq!(report.rolled_over, 0);
+        assert!(chain.sent.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -395,7 +560,8 @@ mod tests {
         let mut check_ins: Vec<(Key, i64)> = (0..10u8).map(|i| ([i + 1; 32], 99)).collect();
         check_ins.push(([50; 32], 100)); // la veille : relue par le keyserver
         check_ins.push(([51; 32], 101)); // aujourd'hui
-        let chain = Fake { profiles: vec![], check_ins, sent: Mutex::new(vec![]) };
+        let pools = vec![DayPool { day: 101, penalties: 0, total_stake: 0 }];
+        let chain = Fake { profiles: vec![], check_ins, pools, sent: Mutex::new(vec![]) };
         let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now).await.unwrap();
         assert_eq!(report.closed, 10);
         assert_eq!(chain.sent.lock().unwrap().len(), 2, "8 fermetures puis 2");

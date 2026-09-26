@@ -46,19 +46,33 @@ fn update_config_recalibrates_without_touching_the_pool() {
 
     ctx.update_config(|params| {
         params.decay_bps = 5000;
-        params.pool_close_delay_seconds = 3_600;
     })
     .unwrap();
 
     let config = ctx.config_state();
     assert_eq!(config.decay_bps, 5000);
-    assert_eq!(config.pool_close_delay_seconds, 3_600);
     let today = ctx.today();
     assert_eq!(
         ctx.day_pool_state(today).unwrap().penalties,
         500 * SKR,
         "le pool ne doit pas bouger"
     );
+}
+
+#[test]
+fn the_close_delay_is_fixed_once_deployed() {
+    // Le changer rouvrirait des pools déjà en partie réclamés, ou fermerait
+    // tôt des pools ouverts : les parts deviendraient inéquitables.
+    let mut ctx = Ctx::new();
+    let result = ctx.update_config(|params| params.pool_close_delay_seconds = 3_600);
+    assert!(result.is_err());
+    assert_eq!(ctx.config_state().pool_close_delay_seconds, 21_600);
+}
+
+#[test]
+fn initialize_config_refuses_a_close_delay_under_an_hour() {
+    let mut ctx = Ctx::empty();
+    assert!(ctx.initialize_config_with(|params| params.pool_close_delay_seconds = 1_800).is_err());
 }
 
 #[test]

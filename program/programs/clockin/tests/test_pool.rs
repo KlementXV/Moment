@@ -166,7 +166,8 @@ fn a_stale_day_argument_is_refused() {
 
 #[test]
 fn a_day_without_publishers_pays_nobody() {
-    // Limite connue : l'amorçage d'un jour sans publieur reste dans le vault.
+    // Sans report (roll_over_day_pool), l'amorçage d'un jour sans publieur reste
+    // dans le vault : personne n'est payé à tort. Le report est testé à part.
     let mut ctx = ctx();
     let a = ctx.new_user();
     ctx.stake(&a, 100 * SKR).unwrap();
