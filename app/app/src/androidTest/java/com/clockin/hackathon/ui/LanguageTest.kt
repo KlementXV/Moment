@@ -58,7 +58,9 @@ class LanguageTest {
                 }
             }
         }
-        compose.onNodeWithText("English").performScrollTo().performClick()
+        // Le choix de langue vit dans une fenêtre, ouverte depuis les réglages.
+        compose.onNodeWithText("Changer la langue").performScrollTo().performClick()
+        compose.onNodeWithText("English").performClick()
         compose.onNodeWithText("Language").assertIsDisplayed()
         compose.onNodeWithText("Welcome").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { assertEquals("en", AppLanguage.selection) }

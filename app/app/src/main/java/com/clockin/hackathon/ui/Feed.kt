@@ -463,6 +463,10 @@ internal fun Feed(
                     photos = moment.photos, verifiedRemote = true,
                     likes = moment.likes, liked = moment.liked, onLike = { onLike(moment.commitment) })
             }
+            // Un fil vide ne doit pas ressembler à un écran cassé.
+            if (remote.isEmpty() && !loading && !needsSignature && feedError == null) {
+                Text(tr(Message.NoOneElseHasPostedToday), style = BodyMd, color = Muted)
+            }
             if (hasMore) TextButton(onClick = onMore, enabled = !loading) { Text(tr(Message.MoreMoments)) }
         }
     }

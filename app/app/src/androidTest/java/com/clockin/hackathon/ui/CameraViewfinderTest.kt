@@ -47,6 +47,10 @@ class CameraViewfinderTest {
         compose.waitUntil(20_000) {
             compose.onAllNodesWithText("Ouverture de la caméra…").fetchSemanticsNodes().isEmpty()
         }
+        // Sur émulateur, l'AVD doit déclarer une caméra avant (hw.camera.front) :
+        // sans elle l'app refuse, à raison, de lancer la capture.
+        compose.onNodeWithText("Moment nécessite une caméra arrière et une caméra avant", substring = true)
+            .assertDoesNotExist()
         compose.onNodeWithContentDescription("Capturer la scène").assertIsEnabled()
         // La vignette n'apparaît qu'une fois la scène prise : au premier temps,
         // le cadre ne montre que la caméra.

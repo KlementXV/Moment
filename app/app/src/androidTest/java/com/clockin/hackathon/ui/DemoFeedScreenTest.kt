@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import com.clockin.hackathon.ChainState
+import com.clockin.hackathon.capture.PhotoPair
 import com.clockin.hackathon.chain.CheckInAccount
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -36,7 +37,18 @@ class DemoFeedScreenTest {
 
     private val morning = 20_348L * DAY_SECONDS + 9 * 3600
     private val today = Math.floorDiv(morning, DAY_SECONDS)
-    private val keyserverNote = "Les Moments des autres arrivent avec le serveur de clés"
+    /** État vide du fil réel : personne d'autre n'a publié, et l'écran le dit. */
+    private val emptyNote = "encore publié aujourd’hui"
+
+    /** Ton propre Moment porte ses vraies photos : seules les cartes de démo
+     * sont des illustrations. */
+    private val ownPhotos: PhotoPair = run {
+        fun jpeg(color: Int) = java.io.ByteArrayOutputStream().also { out ->
+            Bitmap.createBitmap(8, 10, Bitmap.Config.ARGB_8888).apply { eraseColor(color) }
+                .compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }.toByteArray()
+        PhotoPair(jpeg(0xFF336699.toInt()), jpeg(0xFF996633.toInt()))
+    }
 
     private val checkedIn = ChainState(
         todayCheckIn = CheckInAccount(ByteArray(32), today, ByteArray(32), ByteArray(32), 1, 4),
@@ -67,7 +79,7 @@ class DemoFeedScreenTest {
                             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState(), enabled = state.posted)
                                 .padding(26.dp)) {
                                 Feed(state, morning, unlocked = state.feedUnlocked, demo = demo,
-                                    photos = null, caption = "",
+                                    photos = ownPhotos, caption = "",
                                     favorites = emptySet(), onToggleFavorite = {},
                                     onCapture = {}, onProfile = {},
                                     minimumHeight = (viewportHeight - 52.dp).coerceAtLeast(0.dp))
@@ -88,15 +100,15 @@ class DemoFeedScreenTest {
         compose.onAllNodesWithText("Illustration").assertCountEquals(moments.size)
     }
 
-    @Test fun the_demo_replaces_the_keyserver_note() {
+    @Test fun the_demo_never_shows_the_empty_note() {
         feed(checkedIn, demo = true)
-        compose.onNodeWithText(keyserverNote, substring = true).assertDoesNotExist()
+        compose.onNodeWithText(emptyNote, substring = true).assertDoesNotExist()
     }
 
-    @Test fun without_the_demo_the_circle_still_explains_the_keyserver() {
+    @Test fun without_the_demo_an_empty_circle_says_so() {
         feed(checkedIn, demo = false)
         screenshot("02-feed-sans-demo")
-        compose.onNodeWithText(keyserverNote, substring = true).assertIsDisplayed()
+        compose.onNodeWithText(emptyNote, substring = true).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(demoMoments(today).first().name, substring = true).assertDoesNotExist()
     }
 
