@@ -43,6 +43,29 @@ class BackendTest {
         assertArrayEquals(unb64(fixture.string("transaction")), tx.serialize())
         assertArrayEquals(byteArrayOf(2, 1, 5), tx.message.serialize().copyOfRange(0, 3))
     }
+    /** Un check-in qui règle aussi un jour manqué (pool de la veille écrit) et
+     * encaisse une part (pool de l'avant-veille lu) : le keyserver doit le
+     * co-signer tel que l'app le construit. Octets relus par
+     * keyserver/tests/android_contract.rs. */
+    @Test fun sharedCheckInWithSettlementPools() {
+        val fixture = Json.parseToJsonElement(java.io.File("../../keyserver/tests/fixtures/android-post-v1.json").readText()).jsonObject
+        val programKey = SolanaPublicKey(program)
+        val day = fixture.string("day").toLong()
+        val authority = Ed25519PrivateKeyParameters(ByteArray(32) { 8 }, 0).generatePublicKey().encoded
+        fun hexBytes(value: String) = value.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val profile = ProfileAccount(
+            owner = wallet, staked = 500 * 1_000_000_000L, settledDay = day - 2, lastCheckInDay = day - 2,
+            exitRequestedAt = 0, exitUnlockAt = 0, totalCheckIns = 3, streak = 3, active = true, faucetClaimed = true,
+            pendingDays = listOf(day - 2, -1L), pendingStakes = listOf(500 * 1_000_000_000L, 0L),
+        )
+        val pools = DailyPool.poolMetas(programKey, profile, bound = day - 1)
+        assertEquals(listOf(false, true), pools.map { it.isWritable })
+        val tx = TransactionBuilder.build(listOf(ClockInInstructions.checkIn(programKey, SolanaPublicKey(wallet),
+            SolanaPublicKey(authority), day, hexBytes(fixture.string("commitment")), hexBytes(fixture.string("blobRef")), pools)),
+            SolanaPublicKey(wallet), Base58.encode(ByteArray(32) { 9 }))
+        java.io.File("build/android-transaction-pools.txt").writeText(java.util.Base64.getEncoder().encodeToString(tx.serialize()))
+        assertArrayEquals(unb64(fixture.string("transactionWithPools")), tx.serialize())
+    }
     @Test fun encryptedPendingPostSurvivesRestartWithoutChangingReferences() {
         val original = packet()
         val deviceKey = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()

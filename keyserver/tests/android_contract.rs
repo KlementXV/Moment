@@ -57,3 +57,33 @@ fn validate_and_cosign_android_transaction() {
     assert_eq!(&signed[129..], &raw[129..]);
     protocol::verify(&expected.authority, &signed[129..], &signed[65..129]).unwrap();
 }
+
+/// Android `check_in` that also settles a missed day (yesterday's pool, written)
+/// and cashes a claim (the day before, read): as built by `DailyPool.poolMetas`.
+#[test]
+fn validate_and_cosign_android_transaction_with_settlement_pools() {
+    use ed25519_dalek::SigningKey;
+    use moment_keyserver::chain::{self, Expected};
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/android-post-v1.json")).unwrap();
+    let field = |name: &str| fixture[name].as_str().unwrap();
+    let day = fixture["day"].as_i64().unwrap();
+    let authority = SigningKey::from_bytes(&[8; 32]);
+    let expected = Expected {
+        program: protocol::key64(field("program")).unwrap(),
+        wallet: protocol::key64(field("wallet")).unwrap(),
+        authority: authority.verifying_key().to_bytes(),
+        day,
+        commitment: protocol::hash_hex(field("commitment")).unwrap(),
+        blob_ref: protocol::hash_hex(field("blobRef")).unwrap(),
+        // What `submit` allows for this profile: its claim and its settle bound.
+        pools: vec![day - 2, day - 1],
+    };
+    let raw = protocol::unbase64(field("transactionWithPools"), 1232).unwrap();
+    assert_eq!(chain::validate_transaction(&raw, &expected).unwrap(), [9; 32]);
+    let signed = chain::cosign(&raw, &expected, &authority).unwrap();
+    assert_eq!(&signed[129..], &raw[129..]);
+    // Without the claim day allowed, the same transaction is refused.
+    let strict = Expected { pools: vec![day - 1], ..expected };
+    assert!(chain::validate_transaction(&raw, &strict).is_err());
+}
