@@ -6,11 +6,11 @@ skip_local_validator = true
 resolution = true
 skip-lint = false
 
-[programs.localnet]
-clockin = "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"
-
 [programs.devnet]
-clockin = "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"
+clockin = "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"
+
+[programs.localnet]
+clockin = "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"
 
 [provider]
 cluster = "localnet"

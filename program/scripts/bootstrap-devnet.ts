@@ -70,7 +70,7 @@ function required(name: string): string {
 }
 
 const programId = new PublicKey(
-  argument("program") ?? "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1",
+  argument("program") ?? "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6",
 );
 const mint = new PublicKey(required("mint"));
 const publicationAuthority = new PublicKey(required("authority"));

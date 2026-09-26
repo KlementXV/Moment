@@ -11,7 +11,7 @@ imagePullSecrets: []
 existingSecret: moment-keyserver-secrets
 config:
   network: devnet
-  programId: 7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1
+  programId: ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6
   authOrigin: https://moment.example.com
   r2Endpoint: https://ACCOUNT_ID.r2.cloudflarestorage.com
   r2Bucket: moment-devnet

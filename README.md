@@ -100,7 +100,7 @@ Le script détecte le Seeker, compile l’APK debug, l’installe en conservant 
 
 ## Programme on-chain (devnet)
 
-Programme Anchor `clockin` : `7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1`.
+Programme Anchor `clockin` : `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6`.
 
 Comptes : `Config` (PDA singleton, paramètres), `Profile` (PDA par wallet, avec ses
 créances sur les pools), `DayPool` (PDA par jour : mises des publieurs et pénalités

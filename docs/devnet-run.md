@@ -1,31 +1,37 @@
-# Déploiement devnet — 2026-09-16
-
-> **Obsolète depuis le pool journalier (2026-09-24).** `Config` et `Profile` ont
-> changé de taille : ce déploiement doit être réinitialisé. Procédure en fin de page.
+# Déploiement devnet — 2026-09-26 (pool journalier)
 
 Déploiement de référence. Toutes ces adresses sont publiques et vérifiables.
 
 | Rôle | Adresse |
 |---|---|
-| Programme `clockin` | `7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1` |
-| Mint SKR de test (9 décimales) | `2B8dXN4cgPuhh5jFM4qrJfzWt718RVpZaP7oGzmuqNPS` |
-| PDA `Config` | `HvWzyGw6ADyTS74TAn7HZTEcATzRzZcao3qNrywBdZxU` |
-| PDA `Vault` | `796gheKx3knzDu3qEUPLjvjCnH3KF5VyBWZJi3jYV3oj` |
+| Programme `clockin` | `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6` |
+| Mint SKR de test (9 décimales) | `FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5` |
+| PDA `Config` | `KtzTHLLs5hoFn47WbUuttmbgj3LykhwfbtDgUfmmkLK` |
+| PDA `Vault` | `DqRiergxvGcs7z51sDfjGWRqggm9eyP6xFMo2r8uekaS` |
 | Admin | `DtdHXBnjyDCkXjponRKvWUySVx7qAXAYPCSDGiVRfHx` |
 | Autorité de publication (dev) | `GjQbefZGYQDtGpBxfLoXv8tyzTHnskCERWVgyegTbT6p` |
 
 La clé privée de l'autorité de publication vit dans `keys/`, gitignoré. Elle
 sera remplacée par celle du keyserver via `set_publication_authority`.
 
+L'ancien programme `7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1` (déploiement du
+2026-09-16, ancienne disposition des comptes) a été fermé le 2026-09-26 pour
+récupérer sa rente (1,59 SOL). Sa clé est archivée dans `keys/`.
+
 ## État vérifié après bootstrap
 
 ```
-pool        500.0 SKR        min_stake   10.0 SKR
-reward_cap  1.0 SKR          faucet      100.0 SKR
-délai       172800 s (48 h)  reward_bps  100 (1 %/jour)
-decay_bps   2500 (25 %)      max_decay   30 jours
+Config      174 octets
+min_stake   500 SKR          faucet      1000 SKR
+retrait     172800 s (48 h)  clôture     21600 s (D+1 06:00 UTC)
+decay_bps   1000 (10 %)      max_decay   30 jours
 faucet_on   true
+DayPool[20722] (2026-09-26)  penalties 500 SKR (amorçage), total_stake 0
 ```
+
+L'amorçage est allé au pool du jour du bootstrap (jour 20722) : il reviendra
+aux publieurs de ce jour-là, après la clôture du 2026-09-27 à 06:00 UTC, et
+restera dans le vault si personne ne publie ce jour-là.
 
 **L'autorité de mint du SKR est le PDA `Config`.** Seul le faucet du programme
 peut désormais en créer : `spl-token mint` échoue pour tout le monde, admin
@@ -33,8 +39,8 @@ compris. C'est la propriété qui rend le solde affiché digne de confiance.
 
 Transactions du bootstrap :
 
-- `initialize_config` : `45u9BHtw3FEKx4F4CBP7n8uW551p6RTmN6SPmi5qUAxbJK4eXyGDTMuSHLbPwx6AvdNerxNxPKnXfpuBLgaJs6M5`
-- `seed_pool` (500 SKR) : `5nk22ZeeFQMTTf9ivsjao4QGiphX5e2qNYNwd46wkobHGxFKnPybYZALjKU61pPt69AY8PcGgQwfTET9BGaCDxiP`
+- `initialize_config` : `2iF5boHKLxJ9ZWgUFWGv3nzF9S2xjhJtKknyNAMqpS75k8kxQgNreUhMvr2aFWEGinFuRWuezxHmSntf2kUfdNgb`
+- `seed_pool` (500 SKR) : `3aSh1nYQ295uGhRFUnkHMWzv5GmirXYVrhvmoPgotpCdfNGfqoADPSxfpdPCYk7LJs3JQTub1R9MBhQVqE9f736D`
 
 ## Rejouer ce déploiement
 
@@ -43,14 +49,14 @@ PUBLICATION_AUTHORITY=<clé publique> ./program/scripts/deploy-devnet.sh
 ```
 
 Le script saute le déploiement si le programme existe déjà — redéployer coûte
-la rente une seconde fois (1,59 SOL).
+la rente une seconde fois (1,96 SOL pour le programme actuel).
 
 ## Vérifier l'état on-chain
 
 ```sh
-spl-token display 2B8dXN4cgPuhh5jFM4qrJfzWt718RVpZaP7oGzmuqNPS --url devnet
-spl-token balance --address 796gheKx3knzDu3qEUPLjvjCnH3KF5VyBWZJi3jYV3oj --url devnet
-solana account HvWzyGw6ADyTS74TAn7HZTEcATzRzZcao3qNrywBdZxU --url devnet
+spl-token display FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5 --url devnet
+spl-token balance --address DqRiergxvGcs7z51sDfjGWRqggm9eyP6xFMo2r8uekaS --url devnet
+solana account KtzTHLLs5hoFn47WbUuttmbgj3LykhwfbtDgUfmmkLK --url devnet
 ```
 
 ## Parcours sur le Seeker
@@ -76,7 +82,7 @@ d'abord le manifeste (signature détachée), puis la transaction `check_in`.
 Vérifier ensuite le compte `CheckIn` du jour : son `commitment` doit être le
 SHA-256 du manifeste signé (voir `docs/manifest-v1.md`).
 
-## Réinitialisation pour le pool journalier (2026-09-24)
+## Réinitialisation pour le pool journalier (faite le 2026-09-26)
 
 Les comptes existants ont l'ancienne disposition (`Config` 184 octets, `Profile`
 95) : le nouveau programme ne peut pas les relire. On repart d'un program id neuf.

@@ -12,7 +12,7 @@ pub use economy::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1");
+declare_id!("ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6");
 
 #[program]
 pub mod clockin {

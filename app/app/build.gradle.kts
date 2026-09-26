@@ -30,7 +30,7 @@ android {
 
         buildConfigField("String", "IDENTITY_RPC_URL", setting("clockin.identityRpcUrl", "https://api.mainnet-beta.solana.com"))
         buildConfigField("String", "RPC_URL", setting("clockin.rpcUrl", "https://api.devnet.solana.com"))
-        buildConfigField("String", "PROGRAM_ID", setting("clockin.programId", "7TgCk9XekpU88Tiewd5VKfhmVJQyxNRR8915pzqU3rG1"))
+        buildConfigField("String", "PROGRAM_ID", setting("clockin.programId", "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"))
         buildConfigField("String", "SKR_MINT", setting("clockin.skrMint", ""))
         buildConfigField("String", "BACKEND_URL", setting("clockin.backendUrl", ""))
         buildConfigField("String", "NETWORK", setting("clockin.network", "devnet"))
