@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "bootstrap": "tsx bootstrap-devnet.ts"
+    "bootstrap": "tsx bootstrap-devnet.ts",
+    "typecheck": "tsc"
   },
   "dependencies": {
     "@solana/web3.js": "^1.98.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.3",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
