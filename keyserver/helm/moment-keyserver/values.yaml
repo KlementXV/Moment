@@ -22,6 +22,20 @@ config:
   databaseMaxConnections: 10
   # CIDRs of ingress/proxy peers only; never all clients or the entire Internet.
   trustedProxyCidrs: []
+# Daily reap (settles absentees, pays out closed pools, closes old check-ins).
+# Its fee-payer key sits under `crank.json` in the secret: a Solana CLI keypair
+# funded in SOL, distinct from publication-authority.json.
+crank:
+  enabled: true
+  # Empty: same secret as `existingSecret`.
+  existingSecret: ""
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
 serviceAccount:
   create: true
   name: ""

@@ -170,6 +170,43 @@ impl Settings {
     }
 }
 
+/// `crank` mode: only what the daily reap needs. No database, no model, and
+/// the co-signing key is not even mounted.
+pub struct CrankSettings {
+    pub rpc_url: String,
+    pub program: Key,
+    pub network: String,
+    pub signer: SigningKey,
+}
+
+impl CrankSettings {
+    pub fn from_env() -> anyhow::Result<Self> {
+        Self::from_lookup(|name| env::var(name).ok())
+    }
+
+    pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> anyhow::Result<Self> {
+        let need = |name: &str| {
+            get(name)
+                .filter(|v| !v.trim().is_empty())
+                .with_context(|| format!("Variable {name} manquante"))
+        };
+        let network = need("NETWORK")?;
+        if !matches!(network.as_str(), "devnet" | "mainnet") {
+            bail!("NETWORK doit valoir devnet ou mainnet");
+        }
+        let rpc_url = need("RPC_URL")?;
+        check_url(&rpc_url, network == "devnet")?;
+        let program = address(&need("PROGRAM_ID")?).context("PROGRAM_ID invalide")?;
+        let signer = load_keypair(&need("CRANK_KEYPAIR")?).context("CRANK_KEYPAIR illisible")?;
+        Ok(Self {
+            rpc_url,
+            program,
+            network,
+            signer,
+        })
+    }
+}
+
 /// Solana CLI keypair file: a JSON array of 64 bytes.
 fn load_keypair(path: &str) -> anyhow::Result<SigningKey> {
     let bytes = Zeroizing::new(std::fs::read(path).context("Impossible de lire la clé")?);
@@ -207,6 +244,39 @@ mod tests {
         let bytes: Vec<u8> = key.to_keypair_bytes().to_vec();
         write!(file, "{}", serde_json::to_string(&bytes).unwrap()).unwrap();
         file
+    }
+
+    fn crank_vars(key: &tempfile::NamedTempFile, rpc: &str) -> impl Fn(&str) -> Option<String> {
+        let path = key.path().to_string_lossy().into_owned();
+        let rpc = rpc.to_owned();
+        move |name: &str| match name {
+            "NETWORK" => Some("devnet".into()),
+            "RPC_URL" => Some(rpc.clone()),
+            "PROGRAM_ID" => Some("ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6".into()),
+            "CRANK_KEYPAIR" => Some(path.clone()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn crank_mode_needs_only_the_rpc_the_program_and_its_own_key() {
+        let file = keyfile(2);
+        let settings = CrankSettings::from_lookup(crank_vars(&file, "https://api.devnet.solana.com")).unwrap();
+        assert_eq!(settings.signer.to_bytes(), [2; 32]);
+        assert_eq!(settings.network, "devnet");
+        assert_eq!(protocol_address(&settings.program), "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6");
+    }
+
+    #[test]
+    fn crank_mode_refuses_a_missing_key_or_an_insecure_rpc() {
+        let file = keyfile(2);
+        let no_key = |name: &str| if name == "CRANK_KEYPAIR" { None } else { crank_vars(&file, "https://api.devnet.solana.com")(name) };
+        assert!(CrankSettings::from_lookup(no_key).is_err());
+        assert!(CrankSettings::from_lookup(crank_vars(&file, "http://rpc.example.com")).is_err());
+    }
+
+    fn protocol_address(key: &Key) -> String {
+        crate::protocol::address_string(key)
     }
 
     #[test]

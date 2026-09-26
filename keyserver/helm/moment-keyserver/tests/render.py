@@ -34,9 +34,48 @@ def find(docs, kind):
     return matches[0]
 
 
+def component(docs, name, kind="Deployment"):
+    def selector(doc):
+        spec = doc["spec"]
+        labels = spec["podSelector"] if kind == "NetworkPolicy" else spec["selector"]
+        return labels["matchLabels"].get("app.kubernetes.io/component")
+    matches = [doc for doc in docs if doc["kind"] == kind and selector(doc) == name]
+    assert len(matches) <= 1, (kind, name, len(matches))
+    return matches[0] if matches else None
+
+
+def validate_crank(docs, network_policy=False):
+    crank = component(docs, "crank")
+    assert crank is not None, "le crank reap doit tourner dans son propre Deployment"
+    # Une seule instance, jamais deux pendant un déploiement : sinon chaque
+    # reap part en double et le doublon paie des frais pour échouer.
+    assert crank["spec"]["replicas"] == 1
+    assert crank["spec"]["strategy"]["type"] == "Recreate"
+    spec = crank["spec"]["template"]["spec"]
+    container = spec["containers"][0]
+    assert container["args"] == ["crank"]
+    assert {"name": "CRANK_KEYPAIR", "value": "/var/run/moment-crank/crank.json"} in container["env"]
+    assert "ports" not in container
+    mounted = [item["key"] for volume in spec["volumes"] if "secret" in volume for item in volume["secret"]["items"]]
+    assert mounted == ["crank.json"], "la clé de co-signature n'est jamais montée dans le crank"
+    assert spec["automountServiceAccountToken"] is False
+    assert container["securityContext"]["readOnlyRootFilesystem"] is True
+    assert container["securityContext"]["capabilities"]["drop"] == ["ALL"]
+    for volume in spec["volumes"]:
+        if "secret" in volume:
+            assert volume["secret"]["defaultMode"] == 0o440
+    keyserver = component(docs, "keyserver")
+    assert all(entry["name"] != "CRANK_KEYPAIR" for entry in keyserver["spec"]["template"]["spec"]["containers"][0]["env"])
+    if network_policy:
+        policy = component(docs, "crank", "NetworkPolicy")
+        assert policy["spec"]["podSelector"]["matchLabels"] == crank["spec"]["selector"]["matchLabels"]
+        assert policy["spec"]["policyTypes"] == ["Ingress", "Egress"]
+        assert "ingress" not in policy["spec"], "le crank n'écoute rien"
+
+
 def validate_common(docs):
     assert not any(doc["kind"] == "Secret" for doc in docs)
-    deployment = find(docs, "Deployment")
+    deployment = component(docs, "keyserver")
     spec = deployment["spec"]["template"]["spec"]
     assert spec["automountServiceAccountToken"] is False
     assert spec["securityContext"]["runAsUser"] == 10001
@@ -114,7 +153,9 @@ def main():
     assert "secret" not in cluster["spec"]["bootstrap"]["initdb"]
     cfg = find(default, "ConfigMap")["data"]
     assert cfg["PGHOST"] == "test-moment-keyserver-pg-rw.moment.svc"
-    assert find(default, "Deployment")["spec"]["replicas"] == 2
+    assert component(default, "keyserver")["spec"]["replicas"] == 2
+    validate_crank(default)
+    assert component(render({"crank": {"enabled": False}}), "crank") is None
 
     full = render({
         "postgresql": {"existingSecret": "db-creds", "walStorage": {"enabled": True}, "monitoring": {"enabled": True}, "backup": {
@@ -125,13 +166,14 @@ def main():
     })
     validate_common(full)
     assert find(full, "ConfigMap")["data"]["TRUSTED_PROXY_CIDRS"] == "10.1.2.3/32,fd00:1::/64"
-    assert "replicas" not in find(full, "Deployment")["spec"]
+    assert "replicas" not in component(full, "keyserver")["spec"]
+    validate_crank(full, network_policy=True)
     assert find(full, "Cluster")["spec"]["bootstrap"]["initdb"]["secret"]["name"] == "db-creds"
     assert find(full, "ObjectStore")["spec"]["retentionPolicy"] == "30d"
     assert find(full, "ScheduledBackup")["spec"]["method"] == "plugin"
     assert "app.kubernetes.io/component" not in find(full, "Cluster")["metadata"]["labels"]
     assert find(full, "PodMonitor")["spec"]["selector"]["matchLabels"]["cnpg.io/cluster"] == "test-moment-keyserver-pg"
-    assert find(full, "NetworkPolicy")["spec"]["podSelector"]["matchLabels"] == find(full, "Deployment")["spec"]["selector"]["matchLabels"]
+    assert component(full, "keyserver", "NetworkPolicy")["spec"]["podSelector"]["matchLabels"] == component(full, "keyserver")["spec"]["selector"]["matchLabels"]
     find(full, "HorizontalPodAutoscaler")
     find(full, "Ingress")
 
@@ -144,7 +186,8 @@ def main():
     validate_common(custom)
     assert "annotations" not in find(custom, "Cluster")["metadata"]
     assert find(custom, "ConfigMap")["data"]["PGHOST"] == "custom-db-rw.moment.svc"
-    assert "@sha256:" in find(custom, "Deployment")["spec"]["template"]["spec"]["containers"][0]["image"]
+    assert "@sha256:" in component(custom, "keyserver")["spec"]["template"]["spec"]["containers"][0]["image"]
+    assert "@sha256:" in component(custom, "crank")["spec"]["template"]["spec"]["containers"][0]["image"]
     for invalid in [
         {"postgresql": {"instances": 1}},
         {"postgresql": {"parameters": {"synchronous_commit": "off"}}},
@@ -156,11 +199,12 @@ def main():
         {"ingress": {"enabled": True}}, {"unknownField": "refused"},
         {"autoscaling": {"enabled": True, "minReplicas": 5, "maxReplicas": 2}},
         {"config": {"authOrigin": "http://insecure.example.com"}},
+        {"crank": {"replicas": 2}},
     ]:
         render(invalid, success=False)
     if options.crds:
         validate_crds(default + full + custom)
-    print("PASS: 5 render variants, 12 invalid configurations, secrets/TLS/probes/security invariants")
+    print("PASS: 6 render variants, 13 invalid configurations, secrets/TLS/probes/security invariants, single-replica crank")
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use moment_keyserver::{
     api::{self, App, SystemClock},
     chain::{Chain, RpcChain},
-    config::{Settings, Storage},
+    config::{CrankSettings, Settings, Storage},
     moderation::OnnxReviewer,
     store::{Db, ObjectBlobs},
 };
@@ -16,6 +16,10 @@ async fn main() -> anyhow::Result<()> {
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
         .init();
+    // `moment-keyserver crank`: the daily reap alone, one replica (see the Helm chart).
+    if std::env::args().nth(1).as_deref() == Some("crank") {
+        return run_crank().await;
+    }
     let settings = Settings::from_env()?;
     let blobs = match &settings.storage {
         Storage::Local(path) => ObjectBlobs::local(path)?,
@@ -111,4 +115,19 @@ async fn shutdown() {
     {
         let _ = tokio::signal::ctrl_c().await;
     }
+}
+
+async fn run_crank() -> anyhow::Result<()> {
+    let settings = CrankSettings::from_env()?;
+    let chain = RpcChain::new(settings.rpc_url, settings.program)?;
+    chain
+        .verify_network(&settings.network)
+        .await
+        .context("Le RPC ne correspond pas au réseau configuré")?;
+    Chain::config(&chain)
+        .await
+        .context("Configuration Solana inaccessible")?;
+    tracing::info!("Crank reap seul (toutes les 15 min de 00:05 à clôture + 5 min UTC)");
+    moment_keyserver::crank::run(Arc::new(chain), settings.program, settings.signer).await;
+    Ok(())
 }

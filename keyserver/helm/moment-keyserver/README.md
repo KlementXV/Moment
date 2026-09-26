@@ -1,6 +1,7 @@
 # Déploiement Kubernetes de Moment
 
-Ce chart déploie deux instances du backend Rust et un cluster PostgreSQL 17
+Ce chart déploie deux instances du backend Rust, une instance du crank `reap`
+quotidien (`crank.enabled`) et un cluster PostgreSQL 17
 CloudNativePG de trois instances (image `17.11-minimal-trixie`, configurable par
 `postgresql.imageName` ; mettre à jour les versions mineures après validation). Les photos restent dans un bucket R2 privé.
 Les clés des Moments, sessions et réservations résident dans PostgreSQL ; tous
@@ -43,6 +44,7 @@ référence simplement le Secret existant ; il n'impose aucun de ces outils.
 | `rpc-url` | URL HTTPS du RPC Solana, éventuel jeton inclus |
 | `key-encryption-key` | 32 octets aléatoires encodés en base64 ; conserver durablement |
 | `publication-authority.json` | Tableau JSON de 64 octets du keypair Solana dédié |
+| `crank.json` | Keypair Solana du crank (même format), **distinct** de la clé de publication, approvisionné en SOL : il paie les `reap` et la fermeture des check-ins. Omis si `crank.enabled=false` ; peut vivre dans un autre Secret (`crank.existingSecret`) |
 | `r2-access-key-id` | Identifiant S3 R2 |
 | `r2-secret-access-key` | Secret S3 R2 |
 
@@ -54,6 +56,7 @@ kubectl -n moment create secret generic moment-keyserver-secrets \
   --from-file=rpc-url=./secrets/rpc-url \
   --from-file=key-encryption-key=./secrets/key-encryption-key \
   --from-file=publication-authority.json=./secrets/publication-authority.json \
+  --from-file=crank.json=./secrets/crank.json \
   --from-file=r2-access-key-id=./secrets/r2-access-key-id \
   --from-file=r2-secret-access-key=./secrets/r2-secret-access-key
 ```
@@ -273,3 +276,14 @@ Un test local à une seule instance exige explicitement
 Une base externe doit configurer elle-même sa réplication synchrone. La perte
 simultanée de plusieurs nœuds et les scénarios de failover doivent être validés
 sur le cluster cible ; cette configuration ne remplace pas les sauvegardes.
+
+## Crank `reap`
+
+Un Deployment séparé (`<release>-crank`, une réplique, stratégie `Recreate`)
+lance `moment-keyserver crank`. Il règle les absents à 00:05 UTC, reprend
+toutes les 15 min jusqu'à la clôture du pool de la veille + 5 min, verse les
+parts clôturées et ferme les check-ins de J-2 (rente rendue aux propriétaires).
+Il ne lit que `NETWORK`, `PROGRAM_ID`, `rpc-url` et `crank.json` : ni base, ni
+modèle, ni clé de publication. Une seule instance, jamais deux : chaque `reap`
+partirait en double et le doublon paierait des frais pour échouer. Surveiller
+son solde SOL ; sans fonds, les pénalités de la veille finissent au pool du jour.

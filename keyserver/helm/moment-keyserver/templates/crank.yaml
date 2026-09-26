@@ -1,0 +1,118 @@
+{{- if .Values.crank.enabled }}
+{{- $selector := dict "app.kubernetes.io/name" (include "moment.name" .) "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/component" "crank" }}
+# Daily reap: one replica, never two (Recreate). Each pod would otherwise send
+# every reap twice, the duplicate paying fees to fail. Only its own fee-payer
+# key is mounted: the publication authority stays with the keyserver pods.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "moment.fullname" . }}-crank
+  labels:
+    {{- include "moment.labels" . | nindent 4 }}
+    app.kubernetes.io/component: crank
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- toYaml $selector | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "moment.serviceAccount" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 10
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: crank
+          image: {{ if .Values.image.digest }}{{ printf "%s@%s" .Values.image.repository .Values.image.digest | quote }}{{ else }}{{ printf "%s:%s" .Values.image.repository .Values.image.tag | quote }}{{ end }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["crank"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          env:
+            - name: NETWORK
+              value: {{ .Values.config.network | quote }}
+            - name: PROGRAM_ID
+              value: {{ .Values.config.programId | quote }}
+            - name: RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.existingSecret }}
+                  key: rpc-url
+            - name: CRANK_KEYPAIR
+              value: "/var/run/moment-crank/crank.json"
+          resources:
+            {{- toYaml .Values.crank.resources | nindent 12 }}
+          volumeMounts:
+            - name: crank-key
+              mountPath: /var/run/moment-crank
+              readOnly: true
+      volumes:
+        - name: crank-key
+          secret:
+            secretName: {{ default .Values.existingSecret .Values.crank.existingSecret }}
+            defaultMode: 0440
+            items:
+              - key: crank.json
+                path: crank.json
+{{- if .Values.networkPolicy.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moment.fullname" . }}-crank
+  labels:
+    {{- include "moment.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- toYaml $selector | nindent 6 }}
+  # No ingress rule: the crank listens to nothing.
+  policyTypes: [Ingress, Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.dnsNamespaceSelector | nindent 14 }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicy.dnsPodSelector | nindent 14 }}
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Solana RPC over HTTPS.
+    - ports:
+        - port: 443
+          protocol: TCP
+{{- end }}
+{{- end }}
