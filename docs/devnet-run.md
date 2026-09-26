@@ -37,6 +37,13 @@ restera dans le vault si personne ne publie ce jour-là.
 peut désormais en créer : `spl-token mint` échoue pour tout le monde, admin
 compris. C'est la propriété qui rend le solde affiché digne de confiance.
 
+Mise à jour en place le 2026-09-26 (même program id, slot 504538637) :
+`close_check_in`, pools vérifiés par leur bump stocké, binaire `opt-level = "z"`.
+L'IDL on-chain est à jour.
+
+Crank du keyserver local : `GMdZj2YK7BYKLScDsF7WZzNRwtoPxHESx8CvZoGcuVyQ`
+(`keyserver/secrets/crank.json`, gitignoré), approvisionné à 0,2 SOL.
+
 Transactions du bootstrap :
 
 - `initialize_config` : `2iF5boHKLxJ9ZWgUFWGv3nzF9S2xjhJtKknyNAMqpS75k8kxQgNreUhMvr2aFWEGinFuRWuezxHmSntf2kUfdNgb`
