@@ -540,6 +540,27 @@ impl Ctx {
         self.send(&[instruction], &[&admin])
     }
 
+    /// Fermeture d'un check-in passé, déclenchée par un tiers (l'admin).
+    pub fn close_check_in(&mut self, owner: &Pubkey, day: i64) -> TransactionResult {
+        self.close_check_in_to(owner, owner, day)
+    }
+
+    /// `recipient` reçoit la rente ; seul le propriétaire du check-in est accepté.
+    pub fn close_check_in_to(&mut self, owner: &Pubkey, recipient: &Pubkey, day: i64) -> TransactionResult {
+        let instruction = Instruction {
+            program_id: clockin::id(),
+            accounts: clockin::accounts::CloseCheckIn {
+                caller: self.admin.pubkey(),
+                owner: *recipient,
+                check_in: self.check_in_address(owner, day),
+            }
+            .to_account_metas(None),
+            data: clockin::instruction::CloseCheckIn { day }.data(),
+        };
+        let admin = self.admin.insecure_clone();
+        self.send(&[instruction], &[&admin])
+    }
+
     pub fn request_exit(&mut self, user: &User) -> TransactionResult {
         let day = self.today();
         let mut accounts = clockin::accounts::RequestExit {

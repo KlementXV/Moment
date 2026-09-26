@@ -116,8 +116,12 @@ réclamable après sa clôture (D+1 06:00 UTC). Le keyserver lance `reap` à 00:
 `docs/superpowers/specs/2026-09-24-pool-journalier-design.md`.
 
 Instructions : `initialize_config`, `update_config`, `set_publication_authority`,
-`seed_pool`, `create_profile`, `faucet`, `stake`, `check_in`, `reap`, `request_exit`,
-`cancel_exit`, `finalize_exit`.
+`seed_pool`, `create_profile`, `faucet`, `stake`, `check_in`, `close_check_in`, `reap`,
+`request_exit`, `cancel_exit`, `finalize_exit`.
+
+`close_check_in` (permissionless, à partir de J+2) ferme un `CheckIn` que plus rien
+ne relit et rend sa rente (≈ 0,0013 SOL) à son propriétaire ; le crank du keyserver
+le fait à chaque passage.
 
 `check_in` exige une **co-signature de l'autorité de publication** : un client modifié
 ne peut ni publier ni prendre part au pool sans le contrôle serveur.

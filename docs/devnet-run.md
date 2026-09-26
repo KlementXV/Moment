@@ -110,7 +110,8 @@ les frais de `reap` et la rente des `DayPool` qu'il crée. Sans cette variable, 
 crank est désactivé (log `Crank reap désactivé`). Il passe à 00:05 UTC puis
 toutes les 15 min jusqu'à la clôture de la veille + 5 min : un passage raté est
 repris tant que le pool de la veille est ouvert, sinon ses pénalités iraient au
-pool du jour.
+pool du jour. À chaque passage, il ferme aussi les `CheckIn` de J-2 et avant
+(`close_check_in`, 8 par transaction) : leur rente revient à leurs propriétaires.
 
 ### Vérification de bout en bout
 

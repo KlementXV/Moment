@@ -36,4 +36,6 @@ pub enum ClockInError {
     TooManyPendingClaims,
     #[msg("Une part du pool n'est pas encore réclamable")]
     ClaimStillOpen,
+    #[msg("Ce check-in est encore lu par le serveur : fermeture possible à partir de J+2")]
+    CheckInTooRecent,
 }

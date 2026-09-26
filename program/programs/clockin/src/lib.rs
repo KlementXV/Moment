@@ -58,6 +58,10 @@ pub mod clockin {
         instructions::check_in::handle_check_in(ctx, day, commitment, blob_ref)
     }
 
+    pub fn close_check_in(ctx: Context<CloseCheckIn>, day: i64) -> Result<()> {
+        instructions::close_check_in::handle_close_check_in(ctx, day)
+    }
+
     pub fn reap(ctx: Context<Reap>, day: i64) -> Result<()> {
         instructions::reap::handle_reap(ctx, day)
     }

@@ -22,6 +22,10 @@ pub trait CrankChain: Send + Sync {
     async fn profiles(&self) -> Result<Vec<Profile>>;
     async fn latest_blockhash(&self) -> Result<Key>;
     async fn send_transaction(&self, raw: &[u8]) -> Result<()>;
+    /// Every `CheckIn` as `(owner, day)`.
+    async fn check_ins(&self) -> Result<Vec<(Key, i64)>> {
+        Ok(vec![])
+    }
 }
 
 pub fn next_run(now: i64, close_delay: i64) -> i64 {
@@ -41,6 +45,52 @@ pub fn next_run(now: i64, close_delay: i64) -> i64 {
         .expect("tomorrow is always ahead")
 }
 
+/// One instruction: program, accounts as `(key, writable)`, data.
+type Ix = (Key, Vec<(Key, bool)>, Vec<u8>);
+
+/// Legacy message signed by `payer`, its only signer. Keys are grouped as the
+/// runtime requires (signer, writable, read-only), each group in first-use
+/// order, program ids last; a key used both ways is writable.
+fn signed_message(payer: &SigningKey, instructions: &[Ix], blockhash: &Key) -> Vec<u8> {
+    let payer_key = payer.verifying_key().to_bytes();
+    let all = || instructions.iter().flat_map(|(_, accounts, _)| accounts.iter());
+    let mut keys = vec![payer_key];
+    for (key, _) in all().filter(|(_, writable)| *writable) {
+        if !keys.contains(key) {
+            keys.push(*key);
+        }
+    }
+    let writable = keys.len();
+    let readonly = all().map(|(key, _)| *key).chain(instructions.iter().map(|(program, _, _)| *program));
+    for key in readonly {
+        if !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    let index = |key: &Key| keys.iter().position(|k| k == key).expect("key listed") as u8;
+    // Every length stays below 128: compact-u16 is a single byte.
+    let mut message = vec![1, 0, (keys.len() - writable) as u8, keys.len() as u8];
+    keys.iter().for_each(|k| message.extend_from_slice(k));
+    message.extend_from_slice(blockhash);
+    message.push(instructions.len() as u8);
+    for (program, accounts, data) in instructions {
+        message.extend_from_slice(&[index(program), accounts.len() as u8]);
+        message.extend(accounts.iter().map(|(key, _)| index(key)));
+        message.push(data.len() as u8);
+        message.extend_from_slice(data);
+    }
+    let mut raw = vec![1];
+    raw.extend_from_slice(&payer.sign(&message).to_bytes());
+    raw.extend_from_slice(&message);
+    raw
+}
+
+fn instruction_data(name: &str, day: i64) -> Vec<u8> {
+    let mut data = chain::discriminator(&format!("global:{name}")).to_vec();
+    data.extend_from_slice(&day.to_le_bytes());
+    data
+}
+
 pub fn reap_transaction(
     program: &Key,
     caller: &SigningKey,
@@ -49,42 +99,50 @@ pub fn reap_transaction(
     pools: &[(i64, bool)],
     blockhash: &Key,
 ) -> Vec<u8> {
-    let payer = caller.verifying_key().to_bytes();
     let pool = |day: i64| chain::pda(program, &[b"day_pool", &day.to_le_bytes()]).0;
-    let config = chain::pda(program, &[b"config"]).0;
-    let profile = chain::pda(program, &[b"profile", owner]).0;
-    let today_pool = pool(day);
-    let mut writable = vec![profile, today_pool];
-    writable.extend(pools.iter().filter(|(_, w)| *w).map(|(d, _)| pool(*d)));
-    let mut readonly = vec![*owner, config, [0; 32]];
-    readonly.extend(pools.iter().filter(|(_, w)| !*w).map(|(d, _)| pool(*d)));
-    readonly.push(*program);
-    let keys: Vec<Key> = std::iter::once(payer).chain(writable).chain(readonly.iter().copied()).collect();
-    let index = |key: &Key| keys.iter().position(|k| k == key).expect("key listed") as u8;
+    let mut accounts = vec![
+        (caller.verifying_key().to_bytes(), true),
+        (*owner, false),
+        (chain::pda(program, &[b"config"]).0, false),
+        (chain::pda(program, &[b"profile", owner]).0, true),
+        (pool(day), true),
+        ([0; 32], false),
+    ];
+    accounts.extend(pools.iter().map(|(d, writable)| (pool(*d), *writable)));
+    signed_message(caller, &[(*program, accounts, instruction_data("reap", day))], blockhash)
+}
 
-    let mut accounts = vec![index(&payer), index(owner), index(&config), index(&profile), index(&today_pool), index(&[0; 32])];
-    accounts.extend(pools.iter().map(|(d, _)| index(&pool(*d))));
-    let mut data = chain::discriminator("global:reap").to_vec();
-    data.extend_from_slice(&day.to_le_bytes());
+/// Check-ins closed per transaction: 8 × 2 keys stay well under 1 232 bytes.
+const CLOSES_PER_TRANSACTION: usize = 8;
 
-    // Every length stays below 128: compact-u16 is a single byte.
-    let mut message = vec![1, 0, readonly.len() as u8, keys.len() as u8];
-    keys.iter().for_each(|k| message.extend_from_slice(k));
-    message.extend_from_slice(blockhash);
-    message.extend_from_slice(&[1, index(program), accounts.len() as u8]);
-    message.extend_from_slice(&accounts);
-    message.push(data.len() as u8);
-    message.extend_from_slice(&data);
-    let mut raw = vec![1];
-    raw.extend_from_slice(&caller.sign(&message).to_bytes());
-    raw.extend_from_slice(&message);
-    raw
+/// `close_check_in` for each `(owner, day)`; the rent goes back to each owner.
+pub fn close_check_ins_transaction(
+    program: &Key,
+    caller: &SigningKey,
+    items: &[(Key, i64)],
+    blockhash: &Key,
+) -> Vec<u8> {
+    let payer = caller.verifying_key().to_bytes();
+    let instructions: Vec<Ix> = items
+        .iter()
+        .map(|(owner, day)| {
+            let check_in = chain::pda(program, &[b"checkin", owner, &day.to_le_bytes()]).0;
+            (
+                *program,
+                vec![(payer, true), (*owner, true), (check_in, true)],
+                instruction_data("close_check_in", *day),
+            )
+        })
+        .collect();
+    signed_message(caller, &instructions, blockhash)
 }
 
 #[derive(Debug, Default)]
 pub struct CrankReport {
     pub sent: usize,
     pub failed: usize,
+    /// Check-ins closed, their rent returned to their owners.
+    pub closed: usize,
 }
 
 /// Idempotent: a profile with nothing to reap is skipped, so the next pass
@@ -117,7 +175,37 @@ pub async fn crank_once(chain: &dyn CrankChain, program: &Key, signer: &SigningK
             }
         }
     }
+    close_old_check_ins(chain, program, signer, today, blockhash, &mut report).await;
     Ok(report)
+}
+
+/// Returns the rent of check-ins nobody reads anymore (from D+2) to their owners.
+/// Best effort: whatever fails is picked up by the next pass.
+async fn close_old_check_ins(
+    chain: &dyn CrankChain,
+    program: &Key,
+    signer: &SigningKey,
+    today: i64,
+    blockhash: Key,
+    report: &mut CrankReport,
+) {
+    let Ok(check_ins) = chain.check_ins().await else {
+        tracing::warn!("crank close: check-ins unavailable");
+        return;
+    };
+    let old: Vec<(Key, i64)> = check_ins.into_iter().filter(|(_, day)| *day <= today - 2).collect();
+    // The reap pass may have taken a while: a fresh blockhash if the RPC answers.
+    let blockhash = chain.latest_blockhash().await.unwrap_or(blockhash);
+    for batch in old.chunks(CLOSES_PER_TRANSACTION) {
+        let raw = close_check_ins_transaction(program, signer, batch, &blockhash);
+        match chain.send_transaction(&raw).await {
+            Ok(()) => report.closed += batch.len(),
+            Err(_) => {
+                report.failed += 1;
+                tracing::warn!(count = batch.len(), "crank close: send failed");
+            }
+        }
+    }
 }
 
 fn unix_now() -> i64 {
@@ -137,7 +225,12 @@ pub async fn run(chain: Arc<RpcChain>, program: Key, signer: SigningKey) {
         let wait = (next_run(now, delay) - now).max(1) as u64;
         tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
         match crank_once(chain.as_ref(), &program, &signer, unix_now()).await {
-            Ok(report) => tracing::info!(sent = report.sent, failed = report.failed, "crank reap"),
+            Ok(report) => tracing::info!(
+                sent = report.sent,
+                closed = report.closed,
+                failed = report.failed,
+                "crank reap"
+            ),
             Err(_) => tracing::warn!("crank reap: chain unavailable"),
         }
     }
@@ -189,13 +282,37 @@ mod tests {
         assert_eq!(&ix[20..28], &100i64.to_le_bytes());
     }
 
-    struct Fake { profiles: Vec<Profile>, sent: Mutex<Vec<Vec<u8>>> }
+    #[test]
+    fn old_check_ins_close_in_one_signed_transaction() {
+        let program = [9; 32];
+        let caller = SigningKey::from_bytes(&[3; 32]);
+        let items = [([4; 32], 98i64), ([5; 32], 97i64)];
+        let raw = close_check_ins_transaction(&program, &caller, &items, &[6; 32]);
+        let message = &raw[65..];
+        crate::protocol::verify(&caller.verifying_key().to_bytes(), message, &raw[1..65]).unwrap();
+        // caller (signataire), 2 propriétaires + 2 check-ins écrits, programme en lecture.
+        assert_eq!(&message[..4], &[1, 0, 1, 6]);
+        let key = |i: usize| &message[4 + 32 * i..4 + 32 * (i + 1)];
+        assert_eq!(key(1), &[4; 32]);
+        assert_eq!(key(2), &crate::chain::pda(&program, &[b"checkin", &[4; 32], &98i64.to_le_bytes()]).0);
+        assert_eq!(key(5), &program);
+        let ix = &message[4 + 32 * 6 + 32..];
+        assert_eq!(ix[0], 2, "une instruction par check-in");
+        assert_eq!(&ix[1..5], &[5, 3, 0, 1], "programme, 3 comptes : caller, owner, check_in");
+        assert_eq!(ix[5], 2);
+        assert_eq!(ix[6], 16);
+        assert_eq!(&ix[7..15], &crate::chain::discriminator("global:close_check_in"));
+        assert_eq!(&ix[15..23], &98i64.to_le_bytes());
+    }
+
+    struct Fake { profiles: Vec<Profile>, check_ins: Vec<(Key, i64)>, sent: Mutex<Vec<Vec<u8>>> }
     #[async_trait::async_trait]
     impl CrankChain for Fake {
         async fn config(&self) -> Result<Config> {
             Ok(Config { authority: [0; 32], min_stake: 1, decay_bps: 1000, max_decay_days: 30, pool_close_delay: 21_600 })
         }
         async fn profiles(&self) -> Result<Vec<Profile>> { Ok(self.profiles.clone()) }
+        async fn check_ins(&self) -> Result<Vec<(Key, i64)>> { Ok(self.check_ins.clone()) }
         async fn latest_blockhash(&self) -> Result<Key> { Ok([6; 32]) }
         async fn send_transaction(&self, raw: &[u8]) -> Result<()> {
             self.sent.lock().unwrap().push(raw.to_vec());
@@ -265,9 +382,22 @@ mod tests {
                 profile(2, 100, 100, true), // à jour, créance de 100 encore ouverte
                 profile(3, 99, -1, false),  // position fermée
             ],
+            check_ins: vec![],
             sent: Mutex::new(vec![]),
         };
         let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now).await.unwrap();
         assert_eq!((report.sent, report.failed), (1, 0));
+    }
+
+    #[tokio::test]
+    async fn check_ins_from_two_days_ago_are_closed_in_batches() {
+        let now = 101 * 86_400 + 300; // jour 101
+        let mut check_ins: Vec<(Key, i64)> = (0..10u8).map(|i| ([i + 1; 32], 99)).collect();
+        check_ins.push(([50; 32], 100)); // la veille : relue par le keyserver
+        check_ins.push(([51; 32], 101)); // aujourd'hui
+        let chain = Fake { profiles: vec![], check_ins, sent: Mutex::new(vec![]) };
+        let report = crank_once(&chain, &[9; 32], &SigningKey::from_bytes(&[3; 32]), now).await.unwrap();
+        assert_eq!(report.closed, 10);
+        assert_eq!(chain.sent.lock().unwrap().len(), 2, "8 fermetures puis 2");
     }
 }

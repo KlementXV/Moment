@@ -479,7 +479,7 @@ impl Chain for RpcChain {
     }
     async fn check_in(&self, wallet: Key, day: i64) -> Result<Option<CheckIn>> {
         let address = pda(&self.program, &[b"checkin", &wallet, &day.to_le_bytes()]).0;
-        let Some(bytes) = self.account(address, "account:CheckIn", 124).await? else {
+        let Some(bytes) = self.account(address, "account:CheckIn", CHECK_IN_LEN).await? else {
             return Ok(None);
         };
         let mut r = Reader::new(&bytes);
@@ -549,6 +549,32 @@ impl crate::crank::CrankChain for RpcChain {
             .ok_or_else(Error::unavailable)?;
         protocol::address(hash).map_err(|_| Error::unavailable())
     }
+    async fn check_ins(&self) -> Result<Vec<(Key, i64)>> {
+        // Only owner and day (bytes 8..48): the answer stays small.
+        let filters = json!([
+            {"dataSize": CHECK_IN_LEN},
+            {"memcmp": {"offset": 0, "bytes": bs58::encode(discriminator("account:CheckIn")).into_string()}}
+        ]);
+        let result = self
+            .rpc_limited(
+                "getProgramAccounts",
+                json!([protocol::address_string(&self.program), {"encoding":"base64","commitment":"confirmed","filters":filters,"dataSlice":{"offset":8,"length":40}}]),
+                PROFILES_MAX_BYTES,
+            )
+            .await?;
+        let entries = result.as_array().ok_or_else(Error::unavailable)?;
+        Ok(entries
+            .iter()
+            .filter_map(|entry| entry["account"]["data"][0].as_str())
+            .filter_map(|data| protocol::unbase64(data, 40).ok())
+            .filter(|bytes| bytes.len() == 40)
+            .map(|bytes| {
+                let owner: Key = bytes[..32].try_into().expect("32 bytes");
+                let day = i64::from_le_bytes(bytes[32..].try_into().expect("8 bytes"));
+                (owner, day)
+            })
+            .collect())
+    }
     async fn send_transaction(&self, raw: &[u8]) -> Result<()> {
         self.rpc(
             "sendTransaction",
@@ -562,6 +588,7 @@ impl crate::crank::CrankChain for RpcChain {
 pub const CONFIG_LEN: usize = 174;
 pub const PROFILE_LEN: usize = 127;
 pub const DAY_POOL_LEN: usize = 37;
+pub const CHECK_IN_LEN: usize = 124;
 /// Anchor layout of `Config`; returns the stored bump, which callers check.
 pub fn decode_config(bytes: &[u8]) -> Result<(Config, u8)> {
     if bytes.len() != CONFIG_LEN || bytes[..8] != discriminator("account:Config") {
@@ -1003,6 +1030,19 @@ mod tests {
         let profiles = chain.profiles().await.unwrap();
         assert_eq!(profiles.len(), 1);
         assert_eq!(profiles[0].owner, [5; 32]);
+        task.abort();
+    }
+    #[tokio::test]
+    async fn crank_lists_check_ins_from_a_data_slice() {
+        use crate::crank::CrankChain;
+        let mut slice = vec![7u8; 32];
+        slice.extend_from_slice(&20_700i64.to_le_bytes());
+        let (chain, task) = mock_rpc(json!({"result": [
+            {"pubkey": "x", "account": {"data": [protocol::b64(&slice), "base64"]}},
+            {"pubkey": "y", "account": {"data": [protocol::b64(&[1, 2, 3]), "base64"]}},
+        ]}))
+        .await;
+        assert_eq!(chain.check_ins().await.unwrap(), vec![([7; 32], 20_700)]);
         task.abort();
     }
     async fn mock_rpc(response: Value) -> (RpcChain, tokio::task::JoinHandle<()>) {

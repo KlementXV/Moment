@@ -108,6 +108,12 @@ pub fn split_decay(staked: u64, missed_days: i64, decay_bps: u16, max_decay_days
     (staked - before_last, before_last - after)
 }
 
+/// Un check-in se ferme à partir de J+2 : le keyserver relit celui du jour
+/// (feed) et celui de la veille (confirmation à cheval sur minuit).
+pub fn check_in_closable(check_in_day: i64, today: i64) -> bool {
+    check_in_day <= today - 2
+}
+
 /// La clôture doit tomber avant la fin du lendemain : c'est ce qui borne à deux
 /// le nombre de créances ouvertes d'un profil.
 pub fn valid_close_delay(delay: i64) -> bool {
@@ -262,6 +268,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_check_in_closes_from_the_day_after_tomorrow() {
+        assert!(!check_in_closable(100, 100));
+        assert!(!check_in_closable(100, 101));
+        assert!(check_in_closable(100, 102));
+        assert!(check_in_closable(100, 150));
     }
 
     #[test]
