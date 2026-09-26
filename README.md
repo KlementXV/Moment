@@ -56,6 +56,11 @@ Prérequis : un déploiement devnet renseigné dans `app/local.properties`
 `clockin.backendUrl`) et un wallet
 Solana Mobile installé.
 
+L'unité du SKR vient du mint lu sur la chaîne : 9 décimales pour le mint de test
+devnet, 6 pour le vrai SKR. `clockin.skrDecimals` (9 par défaut, 6 pour une build
+mainnet) ne sert qu'à l'affichage avant cette lecture ; aucune mise ne part tant
+que le mint n'a pas été lu.
+
 1. Installer l'APK, puis **Découvrir Moment**.
 2. Ouvrir le profil par l’avatar, recevoir 1000 SKR de test puis staker 500 SKR. Chaque étape est une transaction signée par le wallet.
 3. Revenir à Home et appuyer sur **Capturer mon Moment** ou **Capturer** pour ouvrir la sheet plein écran, autoriser la caméra, capturer la scène, puis prendre le selfie.

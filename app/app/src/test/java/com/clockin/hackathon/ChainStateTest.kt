@@ -57,4 +57,12 @@ class ChainStateTest {
         assertEquals(10 * SKR, s.todayPoolTotal)
         assertEquals(5 * SKR, s.myShareToday)  // 10 × 500 / (500 + 500)
     }
+
+    @Test fun `no stake is sent before the mint decimals are read`() {
+        // Un montant saisi dans la mauvaise unité enverrait 1 000 fois trop sur
+        // mainnet (6 décimales contre 9) : la mise attend la lecture du mint.
+        assertEquals(false, state(noon).copy(skrDecimals = null).canStake)
+        assertEquals(true, state(noon).copy(skrDecimals = 6).canStake)
+    }
 }
+

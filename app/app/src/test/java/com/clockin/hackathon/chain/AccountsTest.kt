@@ -92,4 +92,31 @@ class AccountsTest {
         val profile = ClockInAccounts.decodeProfile(profileBytes(settledDay = 20_600L))
         assertEquals(0L, profile.settledBalance(2500, 30, 20_708L))
     }
+
+    // Octets réels des deux mints, relevés le 2026-09-27 : le décodeur doit
+    // lire leurs décimales, sans supposer celles du mint de test.
+    private val devnetTestMint = java.util.Base64.getDecoder().decode(
+        "AQAAAATXPZC60rNhTOVePsss0spHYygFnmvJr+UgDNpBjqEMABCl1OgAAAAJAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    )
+    private val mainnetSkrMint = java.util.Base64.getDecoder().decode(
+        "AQAAANU721mLTlyETyBmNLVCQu0ZtyoLZVaIPavZk94uC5wwwOsnI9G4JQAGAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+    )
+
+    @Test
+    fun reads_the_decimals_of_the_real_mints() {
+        assertEquals(9, ClockInAccounts.decodeMintDecimals(devnetTestMint))
+        assertEquals(6, ClockInAccounts.decodeMintDecimals(mainnetSkrMint))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun refuses_a_truncated_mint() {
+        ClockInAccounts.decodeMintDecimals(mainnetSkrMint.copyOf(44))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun refuses_an_uninitialized_mint() {
+        val uninitialized = mainnetSkrMint.copyOf().also { it[45] = 0 }
+        ClockInAccounts.decodeMintDecimals(uninitialized)
+    }
 }
+

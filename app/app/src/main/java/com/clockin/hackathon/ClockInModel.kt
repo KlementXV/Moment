@@ -48,7 +48,8 @@ import java.time.Instant
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 
-/** Une unité de SKR affichable : le mint de test a 9 décimales. */
+/** Un SKR du mint de test devnet (9 décimales) : valeurs des tests et de la démo.
+ * L'app affiche et saisit dans l'unité du mint réellement lu, `SkrUnit`. */
 const val SKR: Long = 1_000_000_000L
 
 /**
@@ -66,7 +67,13 @@ data class ChainState(
     val pools: Map<Long, DayPoolAccount> = emptyMap(),
     /** Instant de la lecture, en secondes epoch : décide quelles créances sont clôturées. */
     val now: Long = 0,
+    /** Décimales du mint SKR lu sur la chaîne ; `null` tant qu'il ne l'est pas. */
+    val skrDecimals: Int? = null,
 ) {
+    /** Une mise saisie dans une unité supposée pourrait partir 1 000 fois trop
+     * grosse (6 décimales contre 9) : elle attend la lecture du mint. */
+    val canStake: Boolean get() = skrDecimals != null
+
     /** Solde réel : celui du compte, après le decay déjà dû. */
     val balance: Long
         get() = if (profile == null || config == null) {
@@ -81,7 +88,7 @@ data class ChainState(
      * La chaîne fait foi dès qu'elle répond : cette valeur n'est vue qu'avant la
      * première lecture. `program/scripts/bootstrap-devnet.ts` écrit la même.
      */
-    val minStake: Long get() = config?.minStake ?: (500 * SKR)
+    val minStake: Long get() = config?.minStake ?: (500 * SkrUnit.unit)
 
     /** Pénalité d'un jour UTC manqué, en points de base, Config non lue comprise. */
     val decayBps: Int get() = config?.decayBps ?: 1_000
@@ -408,7 +415,12 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun stake(amount: Long) = submit { owner, skrMint ->
+    fun stake(amount: Long) {
+        if (!state.canStake) { error = tr(Message.SkrUnitNotReadYet); return }
+        stakeNow(amount)
+    }
+
+    private fun stakeNow(amount: Long) = submit { owner, skrMint ->
         buildList {
             // A wallet that already holds SKR may never have used the faucet.
             if (!state.hasProfile) add(ClockInInstructions.createProfile(programId, owner))
@@ -570,6 +582,9 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
                 ?.let(ClockInAccounts::decodeDayPool)?.let { poolDay to it }
         }.toMap()
         val balance = mint?.let { rpc.tokenBalance(ClockInAddresses.associatedToken(owner, it)) } ?: 0
+        // Le mint fait foi sur l'unité : 9 décimales en test, 6 pour le vrai SKR.
+        val skrDecimals = mint?.let { rpc.accountData(it, ClockInInstructions.TOKEN_PROGRAM) }
+            ?.let(ClockInAccounts::decodeMintDecimals)
         val saved = withContext(Dispatchers.IO) { pending.read(owner.base58(), day) }
         if (wallet?.address != owner) return
         require(profile == null || profile.owner.contentEquals(owner.bytes))
@@ -577,8 +592,9 @@ class ClockInModel(application: Application) : AndroidViewModel(application) {
         hasPendingPublication = saved != null
         if (authWallet != owner.base58()) { remoteFeed = emptyList(); feedCursor = null }
         if (state.day != day || checkIn == null) { remoteFeed = emptyList(); feedCursor = null }
+        skrDecimals?.let { SkrUnit.decimals = it }
         state = ChainState(config, profile, checkIn, balance, day, loaded = true,
-            pools = pools, now = Instant.now().epochSecond)
+            pools = pools, now = Instant.now().epochSecond, skrDecimals = skrDecimals)
     }
 
     private fun messageFor(failure: Throwable): String = run { android.util.Log.w("Moment", "Action echouee", failure) }.let { when (failure) {

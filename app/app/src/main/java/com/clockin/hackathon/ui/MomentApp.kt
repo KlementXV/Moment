@@ -63,25 +63,30 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.sp
 import com.clockin.hackathon.ChainState
 import com.clockin.hackathon.ClockInModel
-import com.clockin.hackathon.SKR
+import com.clockin.hackathon.SkrUnit
 import com.clockin.hackathon.capture.PhotoPair
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-/** Le mint SKR de test a 9 décimales. On en affiche deux, sans arrondi trompeur. */
-internal fun money(value: Long) = String.format(AppLanguage.locale, "%.2f", value / SKR.toDouble())
+/** Deux décimales affichées, quelle que soit la précision du mint (6 ou 9). */
+internal fun money(value: Long, decimals: Int = SkrUnit.decimals) =
+    String.format(AppLanguage.locale, "%.2f", value / SkrUnit.pow10(decimals).toDouble())
 /** Même montant, mais sans décimales quand il n'y en a pas : « 50 SKR », pas « 50,00 SKR ». */
-internal fun skr(value: Long) = if (value % SKR == 0L) "${value / SKR}" else money(value)
+internal fun skr(value: Long, decimals: Int = SkrUnit.decimals): String {
+    val unit = SkrUnit.pow10(decimals)
+    return if (value % unit == 0L) "${value / unit}" else money(value, decimals)
+}
 /**
  * Un montant tapé à la main, en unités de base.
  *
- * La virgule française vaut le point. Au-delà des neuf décimales du mint, les
+ * La virgule française vaut le point. Au-delà des décimales du mint, les
  * chiffres sont coupés plutôt qu'arrondis : arrondir inventerait des unités que
  * la chaîne ne sait pas représenter. Renvoie `null` si ce n'est pas un montant.
  */
-internal fun parseSkrAmount(text: String): Long? {
+internal fun parseSkrAmount(text: String, decimals: Int = SkrUnit.decimals): Long? {
+    val unit = SkrUnit.pow10(decimals)
     val cleaned = text.replace(',', '.').trim()
     val parts = cleaned.split('.')
     if (parts.size > 2) return null
@@ -91,8 +96,8 @@ internal fun parseSkrAmount(text: String): Long? {
     if (whole.isEmpty() && fraction.isEmpty()) return null
     if (whole.any { !it.isDigit() } || fraction.any { !it.isDigit() }) return null
     val units = whole.ifEmpty { "0" }.toLongOrNull() ?: return null
-    if (units > Long.MAX_VALUE / SKR) return null
-    return units * SKR + fraction.take(9).padEnd(9, '0').toLong()
+    if (units > Long.MAX_VALUE / unit) return null
+    return units * unit + fraction.take(decimals).padEnd(decimals, '0').ifEmpty { "0" }.toLong()
 }
 
 /**
@@ -100,11 +105,12 @@ internal fun parseSkrAmount(text: String): Long? {
  *
  * [skr] s'arrête à deux décimales : suffisant pour lire un solde, destructeur
  * pour une saisie — reformater « 0,000000001 » en « 0,00 » effacerait ce que la
- * personne vient de taper. Ici les neuf décimales tiennent, zéros inutiles ôtés.
+ * personne vient de taper. Ici toutes les décimales du mint tiennent, zéros inutiles ôtés.
  */
-internal fun formatSkrInput(value: Long): String {
-    val units = value / SKR
-    val fraction = (value % SKR).toString().padStart(9, '0').trimEnd('0')
+internal fun formatSkrInput(value: Long, decimals: Int = SkrUnit.decimals): String {
+    val unit = SkrUnit.pow10(decimals)
+    val units = value / unit
+    val fraction = if (decimals == 0) "" else (value % unit).toString().padStart(decimals, '0').trimEnd('0')
     return if (fraction.isEmpty()) "$units" else "$units${java.text.DecimalFormatSymbols.getInstance(AppLanguage.locale).decimalSeparator}$fraction"
 }
 

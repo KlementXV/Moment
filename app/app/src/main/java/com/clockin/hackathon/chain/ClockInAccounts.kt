@@ -110,6 +110,14 @@ object ClockInAccounts {
         }
     }
 
+    /** Décimales d'un mint SPL Token : octet 44, après l'autorité de mint
+     * (COption<Pubkey>, 36 octets) et l'offre (u64). L'octet 45 dit s'il est initialisé. */
+    fun decodeMintDecimals(data: ByteArray): Int {
+        require(data.size >= 82) { "mint tronqué" }
+        require(data[45].toInt() == 1) { "mint non initialisé" }
+        return data[44].toInt() and 0xFF
+    }
+
     fun decodeDayPool(data: ByteArray): DayPoolAccount {
         val reader = readerFor(data, "DayPool")
         return DayPoolAccount(

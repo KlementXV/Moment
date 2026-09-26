@@ -58,4 +58,29 @@ class AmountInputTest {
         assertEquals("12,5", formatSkrInput(12 * SKR + SKR / 2))
         assertEquals("0,000000001", formatSkrInput(1))
     }
+
+    // ── Le vrai SKR (mainnet) a 6 décimales ─────────────────────────────────
+
+    @Test fun `with six decimals a whole number is read in the real mint units`() {
+        assertEquals(500_000_000L, parseSkrAmount("500", decimals = 6))
+        assertEquals(12_500_000L, parseSkrAmount("12,5", decimals = 6))
+        assertEquals(1L, parseSkrAmount("0,000001", decimals = 6))
+    }
+
+    @Test fun `with six decimals the seventh is dropped, not rounded`() {
+        assertEquals(1L, parseSkrAmount("0,0000019", decimals = 6))
+    }
+
+    @Test fun `with six decimals the field round-trips to the last unit`() {
+        listOf(0L, 1L, 1_000_000L, 500_000_000L, 1_284_500_000L, 3_123_456L).forEach { amount ->
+            assertEquals(amount, parseSkrAmount(formatSkrInput(amount, decimals = 6), decimals = 6))
+        }
+        assertEquals("12,5", formatSkrInput(12_500_000L, decimals = 6))
+        assertEquals("0,000001", formatSkrInput(1L, decimals = 6))
+    }
+
+    @Test fun `with six decimals the display reads whole SKR`() {
+        assertEquals("500", skr(500_000_000L, decimals = 6))
+        assertEquals("12,35", skr(12_345_678L, decimals = 6))
+    }
 }

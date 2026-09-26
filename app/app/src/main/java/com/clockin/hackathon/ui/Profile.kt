@@ -63,7 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.clockin.hackathon.BuildConfig
 import com.clockin.hackathon.ChainState
-import com.clockin.hackathon.SKR
+import com.clockin.hackathon.SkrUnit
 import kotlinx.coroutines.delay
 
 private val CardShape = RoundedCornerShape(18.dp)
@@ -76,7 +76,6 @@ private const val NB = " "
 
 /** Valeurs de repli quand la Config on-chain n'est pas encore lue. */
 private const val DEFAULT_WITHDRAWAL_SECONDS = 172_800L
-private const val DEFAULT_FAUCET = 1000 * SKR
 
 /**
  * Page « Moi », sur la maquette : identité, solde, mise, pool, puis le reste.
@@ -371,7 +370,7 @@ private fun ConnectSection(busy: Boolean, onConnect: () -> Unit) {
 
 @Composable
 private fun FaucetSection(state: ChainState, busy: Boolean, onFaucet: () -> Unit) {
-    val amount = state.config?.faucetAmount ?: DEFAULT_FAUCET
+    val amount = state.config?.faucetAmount ?: (1000 * SkrUnit.unit)
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         SectionTitle(tr(Message.GettingStarted))
         if (state.config?.faucetEnabled == false) {
@@ -407,7 +406,7 @@ private fun StakeSection(state: ChainState, busy: Boolean, onStake: (Long) -> Un
     val floor = when {
         !state.active -> minimum
         state.balance < minimum -> minimum - state.balance
-        else -> SKR
+        else -> SkrUnit.unit
     }
     val presets = remember(floor) { listOf(floor, floor * 5, floor * 10).distinct() }
     var amount by rememberSaveable(floor) { mutableLongStateOf(floor) }

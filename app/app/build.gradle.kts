@@ -32,6 +32,10 @@ android {
         buildConfigField("String", "RPC_URL", setting("clockin.rpcUrl", "https://api.devnet.solana.com"))
         buildConfigField("String", "PROGRAM_ID", setting("clockin.programId", "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"))
         buildConfigField("String", "SKR_MINT", setting("clockin.skrMint", ""))
+        // Décimales du mint avant sa première lecture : 9 pour le mint de test
+        // devnet, 6 pour le vrai SKR. La chaîne fait foi dès qu'elle répond.
+        buildConfigField("int", "SKR_DECIMALS", setting("clockin.skrDecimals", "9").trim('"')
+            .also { require(it.toIntOrNull() in 0..18) { "clockin.skrDecimals doit être un entier entre 0 et 18" } })
         buildConfigField("String", "BACKEND_URL", setting("clockin.backendUrl", ""))
         buildConfigField("String", "NETWORK", setting("clockin.network", "devnet"))
     }
