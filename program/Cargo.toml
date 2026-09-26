@@ -12,6 +12,10 @@ rust-version = "1.89.0"
 overflow-checks = true
 lto = "fat"
 codegen-units = 1
+# Taille plutôt que vitesse : la rente de déploiement suit la taille du binaire
+# (331 Ko contre 396 Ko, ≈ 0,33 SOL), et chaque instruction reste loin du
+# plafond de calcul (≈ +30 % d'unités, sans effet hors frais de priorité).
+opt-level = "z"
 [profile.release.build-override]
 opt-level = 3
 incremental = false
