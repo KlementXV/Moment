@@ -35,6 +35,7 @@ solana-clock = "3.0"
 solana-pubkey = "3.0"
 solana-program-pack = "3.0"
 solana-system-interface = "2.0"
+solana-account = "3.0"
 
 
 [lints.rust]

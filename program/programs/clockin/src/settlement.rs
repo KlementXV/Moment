@@ -20,33 +20,51 @@ impl<'a, 'info> PoolAccounts<'a, 'info> {
         Self { accounts, program_id }
     }
 
-    /// Un compte attendu et absent est une erreur : sauter une créance ou
-    /// dérouter une pénalité en silence serait pire qu'un échec.
-    fn find(&self, day: i64) -> Result<&'a AccountInfo<'info>> {
-        let (address, _) =
-            Pubkey::find_program_address(&[DAY_POOL_SEED, &day.to_le_bytes()], self.program_id);
-        self.accounts
-            .iter()
-            .find(|info| info.key == &address)
-            .ok_or_else(|| error!(ClockInError::MissingDayPool))
+    /// Pool déjà créé pour ce jour : repéré par son contenu, puis authentifié
+    /// par son bump stocké (`create_program_address`, un seul hachage) plutôt
+    /// que par une recherche d'adresse par essais (`find_program_address`).
+    /// Un compte du programme au bon jour mais hors de l'adresse PDA est refusé.
+    fn created(&self, day: i64) -> Result<Option<(&'a AccountInfo<'info>, DayPool)>> {
+        for info in self.accounts {
+            if info.owner != self.program_id || info.data_is_empty() {
+                continue;
+            }
+            let Ok(pool) = DayPool::try_deserialize(&mut &info.try_borrow_data()?[..]) else {
+                continue;
+            };
+            if pool.day != day {
+                continue;
+            }
+            let expected = Pubkey::create_program_address(
+                &[DAY_POOL_SEED, &day.to_le_bytes(), &[pool.bump]],
+                self.program_id,
+            )
+            .map_err(|_| error!(ClockInError::MissingDayPool))?;
+            require_keys_eq!(*info.key, expected, ClockInError::MissingDayPool);
+            return Ok(Some((info, pool)));
+        }
+        Ok(None)
     }
 
     /// `None` : personne n'a publié ce jour-là, le pool n'a jamais été créé.
-    fn read(&self, day: i64) -> Result<Option<DayPool>> {
-        let info = self.find(day)?;
-        if info.owner != self.program_id || info.data_is_empty() {
-            return Ok(None);
+    /// Le compte doit tout de même être fourni : sauter une créance ou dérouter
+    /// une pénalité en silence serait pire qu'un échec.
+    fn read(&self, day: i64) -> Result<Option<(&'a AccountInfo<'info>, DayPool)>> {
+        if let Some(found) = self.created(day)? {
+            return Ok(Some(found));
         }
-        let data = info.try_borrow_data()?;
-        Ok(Some(DayPool::try_deserialize(&mut &data[..])?))
+        // Cas rare (jour sans publieur) : seule l'adresse identifie un compte vide.
+        let (address, _) =
+            Pubkey::find_program_address(&[DAY_POOL_SEED, &day.to_le_bytes()], self.program_id);
+        require!(
+            self.accounts.iter().any(|info| info.key == &address),
+            ClockInError::MissingDayPool
+        );
+        Ok(None)
     }
 
-    fn add_penalty(&self, day: i64, amount: u64) -> Result<()> {
-        let info = self.find(day)?;
+    fn add_penalty(info: &AccountInfo, mut pool: DayPool, amount: u64) -> Result<()> {
         require!(info.is_writable, ClockInError::MissingDayPool);
-        let mut pool = self
-            .read(day)?
-            .ok_or_else(|| error!(ClockInError::MissingDayPool))?;
         pool.penalties = pool
             .penalties
             .checked_add(amount)
@@ -76,7 +94,7 @@ pub fn settle(
         if day == NO_PENDING_DAY || now < pool_closes_at(day, delay) {
             continue;
         }
-        let pool = pools
+        let (_, pool) = pools
             .read(day)?
             .ok_or_else(|| error!(ClockInError::MissingDayPool))?;
         let gain = share(pool.penalties, profile.pending_stakes[slot], pool.total_stake);
@@ -104,14 +122,18 @@ pub fn settle(
     profile.streak = 0;
 
     // Un pool clôturé ne reçoit plus rien : inutile d'exiger son compte.
-    let total_stake = if now < pool_closes_at(through_day, delay) {
-        pools.read(through_day)?.map_or(0, |pool| pool.total_stake)
+    let penalty_pool = if now < pool_closes_at(through_day, delay) {
+        pools.read(through_day)?
     } else {
-        0
+        None
     };
+    let total_stake = penalty_pool.as_ref().map_or(0, |(_, pool)| pool.total_stake);
     let mut to_today = older;
     match route_penalty(through_day, day_of(now), now, delay, total_stake) {
-        Dest::Day(day) => pools.add_penalty(day, last)?,
+        Dest::Day(_) => {
+            let (info, pool) = penalty_pool.ok_or_else(|| error!(ClockInError::MissingDayPool))?;
+            PoolAccounts::add_penalty(info, pool, last)?
+        }
         Dest::Today => {
             to_today = to_today
                 .checked_add(last)

@@ -221,3 +221,55 @@ fn a_client_clock_ahead_of_the_chain_still_routes_the_penalty() {
     ctx.reap_with(&c.pubkey(), today, pools).unwrap();
     assert_eq!(ctx.day_pool_state(d1).unwrap().penalties, 10 * SKR);
 }
+
+#[test]
+fn settling_pools_costs_little_compute() {
+    // Les pools créés s'authentifient par leur bump stocké, sans recherche
+    // d'adresse par essais (find_program_address). `reap` n'utilise que des bumps
+    // stockés : sa consommation ne dépend pas des clés aléatoires du test.
+    // Avant : 42 676 CU (pénalité + part) et 19 599 CU (part seule).
+    let mut ctx = ctx();
+    let (a, _b, c, _d1) = three_members_one_absent(&mut ctx);
+    ctx.warp_to_next(5 * 60);
+    let penalty = ctx.reap(&c.pubkey()).unwrap().compute_units_consumed;
+    ctx.warp_to_next(6 * HOUR + 5 * 60);
+    let claim = ctx.reap(&a.pubkey()).unwrap().compute_units_consumed;
+    assert!(penalty <= 25_000, "reap pénalité + part : {penalty} CU");
+    assert!(claim <= 16_000, "reap part seule : {claim} CU");
+}
+
+#[test]
+fn a_program_owned_impostor_pool_is_refused() {
+    // Un compte DayPool plausible (même jour, pénalités gonflées) mais hors de
+    // l'adresse PDA : il ne doit jamais servir à payer une part.
+    use anchor_lang::AccountSerialize;
+    let mut ctx = ctx();
+    let a = ctx.new_user();
+    ctx.stake(&a, 100 * SKR).unwrap();
+    let d0 = ctx.today();
+    ctx.check_in(&a).unwrap();
+    ctx.warp_to_next(7 * HOUR);
+
+    let genuine = ctx.day_pool_state(d0).unwrap();
+    let mut forged = genuine.clone();
+    forged.penalties = 1_000 * SKR;
+    let mut data = Vec::new();
+    forged.try_serialize(&mut data).unwrap();
+    let impostor = anchor_lang::prelude::Pubkey::new_unique();
+    ctx.svm
+        .set_account(
+            impostor,
+            solana_account::Account {
+                lamports: 1_000_000_000,
+                data,
+                owner: clockin::id(),
+                executable: false,
+                rent_epoch: 0,
+            },
+        )
+        .unwrap();
+    let today = ctx.today();
+    let result = ctx.reap_with(&a.pubkey(), today, vec![AccountMeta::new_readonly(impostor, false)]);
+    assert!(result.is_err());
+    assert_eq!(ctx.profile_state(&a.profile).staked, 100 * SKR);
+}
