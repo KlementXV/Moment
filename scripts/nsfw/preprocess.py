@@ -13,7 +13,6 @@ def prepare(rgb):
     assert channels == 3 and h > 0 and w > 0
     scale = SIZE / max(w, h)
     dw, dh = max(1, int(w * scale + 0.5)), max(1, int(h * scale + 0.5))
-    # Half-pixel centers, edge-clamped samples, round-half-up to uint8.
     xs = np.maximum(0, np.minimum(w - 1, (np.arange(dw) + 0.5) * w / dw - 0.5))
     ys = np.maximum(0, np.minimum(h - 1, (np.arange(dh) + 0.5) * h / dh - 0.5))
     x0, y0 = xs.astype(int), ys.astype(int)

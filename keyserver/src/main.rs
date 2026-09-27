@@ -11,12 +11,10 @@ use tokio::sync::Semaphore;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // No request-body/header/SDK debug logging, even if RUST_LOG is set externally.
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
         .init();
-    // `moment-keyserver crank`: the daily reap alone, one replica (see the Helm chart).
     if std::env::args().nth(1).as_deref() == Some("crank") {
         return run_crank().await;
     }
@@ -49,7 +47,6 @@ async fn main() -> anyhow::Result<()> {
     if config.authority != settings.authority.verifying_key().to_bytes() {
         bail!("La clé serveur ne correspond pas à Config.publication_authority. Effectuez la rotation on-chain avant de démarrer.");
     }
-    // Dynamic runtime is provided by the operator; never download native code at startup.
     if !settings.ort_library.is_file() {
         bail!("ORT_DYLIB_PATH doit pointer vers la bibliothèque ONNX Runtime installée");
     }

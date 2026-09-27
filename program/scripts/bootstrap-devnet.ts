@@ -1,34 +1,3 @@
-/**
- * Configure un déploiement devnet de clockin : initialize_config puis seed_pool.
- *
- * Ces deux instructions ne sont appelables ni par le CLI Solana ni par
- * `anchor run` : elles portent des arguments Borsh et des PDA.
- *
- * Séquence complète d'un déploiement, dont ce script est la partie centrale :
- *
- *   1. anchor deploy
- *   2. spl-token create-token --decimals 9        (l'admin est autorité de mint)
- *   3. spl-token mint <MINT> <montant>            (de quoi amorcer le pool)
- *   4. ce script                                   (initialize_config + seed_pool)
- *   5. spl-token authorize <MINT> mint <CONFIG_PDA>
- *
- * `seed_pool` verse l'amorçage au pool du jour UTC courant : il est partagé par
- * ceux qui publient ce jour-là, après la clôture (D+1 06:00 UTC). Si personne ne
- * publie ce jour-là, il reste dans le vault, non attribué (spec pool journalier).
- *
- * Mainnet (vrai SKR, 6 décimales, pas de faucet ni de mint à créer) :
- *
- *   npx tsx bootstrap-devnet.ts --rpc <RPC mainnet> --program <ID> \
- *     --mint SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3 --authority <clé> \
- *     --faucet-enabled false --seed 0
- *
- * Les montants (--seed, --min-stake, --faucet) sont en SKR entiers : le script
- * lit les décimales sur le mint.
- *
- * L'étape 5 est ce qui ferme la porte : après elle, plus personne ne peut créer
- * de SKR sauf le programme lui-même, par son faucet. L'ordre compte — l'admin
- * doit pouvoir mint avant de céder cette autorité, sinon il n'a rien à déposer.
- */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -85,8 +54,6 @@ const publicationAuthority = new PublicKey(required("authority"));
 const rpcUrl = argument("rpc") ?? "https://api.devnet.solana.com";
 const connection = new Connection(rpcUrl, "confirmed");
 
-// Le mint fait foi sur l'unité : 9 décimales pour le mint de test devnet, 6 pour
-// le vrai SKR. Supposer 9 sur mainnet multiplierait chaque montant par 1 000.
 const mintAccount = await connection.getAccountInfo(mint);
 if (!mintAccount || !mintAccount.owner.equals(TOKEN_PROGRAM) || mintAccount.data.length < 82) {
   throw new Error(`${mint.toBase58()} n'est pas un mint SPL Token`);
@@ -95,7 +62,6 @@ if (mintAccount.data[45] !== 1) throw new Error("mint non initialisé");
 const decimals = mintAccount.data[44];
 const SKR = 10n ** BigInt(decimals);
 
-/** Montant entier en SKR (argument), converti dans l'unité du mint. */
 function skr(name: string, fallback: string): bigint {
   const value = argument(name) ?? fallback;
   if (!/^\d+$/.test(value)) throw new Error(`--${name} doit être un nombre entier de SKR`);
@@ -122,16 +88,19 @@ const [adminTokenAccount] = PublicKey.findProgramAddressSync(
   ASSOCIATED_TOKEN_PROGRAM,
 );
 
-/** Paramètres de travail (spec pool journalier). */
 const params = Buffer.concat([
-  u64(minStake), // min_stake
-  u64(faucetAmount), // faucet_amount
-  i64(172_800n), // withdrawal_delay_seconds : 48 h
-  i64(21_600n), // pool_close_delay_seconds : pool de D clôturé à D+1 06:00 UTC
-  u16(1000), // decay_bps : 10 % par jour manqué
-  Buffer.from([30]), // max_decay_days
-  Buffer.from([faucetEnabled ? 1 : 0]), // faucet_enabled : false sur mainnet
+  u64(minStake),
+  u64(faucetAmount),
+  i64(172_800n),
+  i64(21_600n),
+  u16(1000),
+  Buffer.from([30]),
+  Buffer.from([faucetEnabled ? 1 : 0]),
 ]);
+
+const [programData] = PublicKey.findProgramAddressSync(
+  [programId.toBuffer()], new PublicKey("BPFLoaderUpgradeab1e11111111111111111111111"),
+);
 
 const initializeConfig = new TransactionInstruction({
   programId,
@@ -143,11 +112,11 @@ const initializeConfig = new TransactionInstruction({
     { pubkey: vault, isSigner: false, isWritable: true },
     { pubkey: TOKEN_PROGRAM, isSigner: false, isWritable: false },
     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    { pubkey: programData, isSigner: false, isWritable: false },
   ],
   data: Buffer.concat([discriminator("initialize_config"), params]),
 });
 
-// Jour UTC vérifié par le programme : un envoi à cheval sur minuit échoue, relancer.
 const today = BigInt(Math.floor(Date.now() / 1000 / 86_400));
 const [dayPool] = PublicKey.findProgramAddressSync(
   [Buffer.from("day_pool"), i64(today)],
@@ -196,7 +165,7 @@ if (seedAmount > 0n) {
 }
 
 console.log("\nÀ mettre dans app/local.properties :");
-console.log(`clockin.skrMint=${mint.toBase58()}`);
-console.log(`clockin.publicationAuthority=${publicationAuthority.toBase58()}`);
+console.log(`moment.skrMint=${mint.toBase58()}`);
+
 console.log("\nPuis fermer le robinet :");
 console.log(`  spl-token authorize ${mint.toBase58()} mint ${config.toBase58()} --url devnet`);

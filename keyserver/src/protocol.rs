@@ -1,4 +1,3 @@
-//! Wire formats shared with Android. Never serialize the signed manifest as JSON.
 use crate::error::{Error, Result};
 use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
@@ -14,7 +13,7 @@ use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
 pub const PACKET_DOMAIN: &[u8] = b"moment-post-v1";
-pub const MANIFEST_DOMAIN: &[u8] = b"clockin-post-v1";
+pub const MANIFEST_DOMAIN: &[u8] = b"moment-manifest-v1";
 pub const MAX_PHOTO: usize = 4 * 1024 * 1024;
 pub const MAX_BLOB: usize = 2 * MAX_PHOTO + 4096;
 pub type Key = [u8; 32];
@@ -174,7 +173,6 @@ pub struct Packet {
     pub rear: Zeroizing<Vec<u8>>,
     pub front: Zeroizing<Vec<u8>>,
 }
-/// UTF-8 bytes; the app caps captions at 80 characters (4 bytes max each).
 pub const MAX_CAPTION: usize = 80 * 4;
 impl Packet {
     pub fn decrypt(blob: &[u8], key: &Key) -> Result<Self> {
@@ -209,7 +207,6 @@ impl Packet {
             .map_err(|_| Error::bad("Signature invalide. Signez à nouveau."))?;
         let rear = Zeroizing::new(field(&mut r, MAX_PHOTO)?.to_vec());
         let front = Zeroizing::new(field(&mut r, MAX_PHOTO)?.to_vec());
-        // v2: encrypted caption (may be empty), authenticated by the on-chain blob_ref.
         if version == 2 {
             let n = u32::from_le_bytes(r.array()?) as usize;
             if n > MAX_CAPTION || std::str::from_utf8(r.take(n)?).is_err() {

@@ -858,25 +858,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clockin"
-version = "0.1.0"
-dependencies = [
- "anchor-lang",
- "anchor-spl",
- "litesvm",
- "litesvm-token",
- "solana-account",
- "solana-clock",
- "solana-keypair",
- "solana-message",
- "solana-program-pack",
- "solana-pubkey 3.0.0",
- "solana-signer",
- "solana-system-interface 2.0.0",
- "solana-transaction",
-]
-
-[[package]]
 name = "cmov"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1787,6 +1768,25 @@ dependencies = [
  "keccak",
  "rand_core 0.6.4",
  "zeroize",
+]
+
+[[package]]
+name = "moment"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "litesvm",
+ "litesvm-token",
+ "solana-account",
+ "solana-clock",
+ "solana-keypair",
+ "solana-message",
+ "solana-program-pack",
+ "solana-pubkey 3.0.0",
+ "solana-signer",
+ "solana-system-interface 2.0.0",
+ "solana-transaction",
 ]
 
 [[package]]

@@ -36,7 +36,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--validation-images", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=ROOT / "app/app/src/main/assets/moderation")
-    parser.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "clockin-hf-cache")
+    parser.add_argument("--cache", type=Path, default=Path(tempfile.gettempdir()) / "moment-hf-cache")
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     config_path = hf_hub_download(REPO, "config.json", revision=REVISION, cache_dir=args.cache)
@@ -92,7 +92,6 @@ def main():
                         tensor = prepare(np.asarray(decoded.convert("RGB")))
                     jpeg_scores[camera] = float(session.run(["nsfw"], {"image": tensor})[0][0])
                 (fixtures / "jpeg-expected.json").write_text(json.dumps(jpeg_scores))
-    # Small asymmetric raw fixture isolates RGB ordering, padding and interpolation.
     rgb = np.arange(13 * 7 * 3, dtype=np.uint8).reshape(13, 7, 3)
     (fixtures / "source-7x13.rgb").write_bytes(rgb.tobytes())
     (fixtures / "padded-7x13.rgb").write_bytes(prepare(rgb).tobytes())

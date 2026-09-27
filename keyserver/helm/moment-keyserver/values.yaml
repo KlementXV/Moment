@@ -7,7 +7,6 @@ image:
   digest: ""
   pullPolicy: IfNotPresent
 imagePullSecrets: []
-# Secrets are provisioned outside Helm; no credentials enter the release record.
 existingSecret: moment-keyserver-secrets
 config:
   network: devnet
@@ -20,14 +19,9 @@ config:
   policyPath: /app/assets/policy.json
   ortLibraryPath: /opt/onnxruntime/lib/libonnxruntime.so
   databaseMaxConnections: 10
-  # CIDRs of ingress/proxy peers only; never all clients or the entire Internet.
   trustedProxyCidrs: []
-# Daily reap (settles absentees, pays out closed pools, closes old check-ins).
-# Its fee-payer key sits under `crank.json` in the secret: a Solana CLI keypair
-# funded in SOL, distinct from publication-authority.json.
 crank:
   enabled: true
-  # Empty: same secret as `existingSecret`.
   existingSecret: ""
   resources:
     requests:
@@ -75,12 +69,10 @@ postgresql:
   clusterName: ""
   keep: true
   instances: 3
-  # Wait for one standby before acknowledging a commit. Disable only for local single-node tests.
   synchronousReplication: true
   imageName: ghcr.io/cloudnative-pg/postgresql:17.11-minimal-trixie
   database: moment
   owner: moment
-  # Empty: operator generates <cluster>-app. Existing secret needs username/password.
   existingSecret: ""
   storage:
     size: 20Gi
@@ -108,7 +100,6 @@ postgresql:
     interval: 30s
   backup:
     enabled: false
-    # A SEPARATE private bucket/path and credentials from app photos.
     destinationPath: ""
     endpointURL: ""
     existingSecret: moment-postgresql-backup
@@ -133,12 +124,9 @@ externalPostgresql:
   caKey: ca.crt
 networkPolicy:
   enabled: false
-  # Standard NetworkPolicy applies only to keyserver; CNPG is operator-managed.
-  # Empty means same-namespace clients only. Add your ingress controller selectors.
   ingressFrom: []
   dnsNamespaceSelector:
     kubernetes.io/metadata.name: kube-system
   dnsPodSelector:
     k8s-app: kube-dns
-  # Add CIDRs for external PostgreSQL or special node-local DNS; HTTPS is allowed.
   additionalEgress: []

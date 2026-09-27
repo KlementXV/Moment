@@ -1,8 +1,5 @@
 {{- if .Values.crank.enabled }}
 {{- $selector := dict "app.kubernetes.io/name" (include "moment.name" .) "app.kubernetes.io/instance" .Release.Name "app.kubernetes.io/component" "crank" }}
-# Daily reap: one replica, never two (Recreate). Each pod would otherwise send
-# every reap twice, the duplicate paying fees to fail. Only its own fee-payer
-# key is mounted: the publication authority stays with the keyserver pods.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -95,7 +92,6 @@ spec:
   podSelector:
     matchLabels:
       {{- toYaml $selector | nindent 6 }}
-  # No ingress rule: the crank listens to nothing.
   policyTypes: [Ingress, Egress]
   egress:
     - to:
@@ -110,7 +106,6 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Solana RPC over HTTPS.
     - ports:
         - port: 443
           protocol: TCP

@@ -11,22 +11,14 @@ val localProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
-/**
- * Paramètre d'un réseau, du plus spécifique au plus général :
- * `clockin.<réseau>.<nom>` dans local.properties, puis la variable
- * d'environnement `CLOCKIN_<RÉSEAU>_<NOM>` (CI), puis l'ancienne clé
- * `clockin.<nom>` (devnet seulement), puis la valeur par défaut du réseau.
- */
 fun setting(network: String, name: String, fallback: String): String {
-    val env = "CLOCKIN_${network}_${name.replace(Regex("([A-Z])"), "_$1")}".uppercase()
-    return localProperties.getProperty("clockin.$network.$name")
+    val env = "MOMENT_${network}_${name.replace(Regex("([A-Z])"), "_$1")}".uppercase()
+    return localProperties.getProperty("moment.$network.$name")
         ?: System.getenv(env)?.takeIf { it.isNotBlank() }
-        ?: localProperties.getProperty("clockin.$name")?.takeIf { network == "devnet" }
+        ?: localProperties.getProperty("moment.$name")?.takeIf { network == "devnet" }
         ?: fallback
 }
 
-/** Valeurs par défaut de chaque réseau. Le program id est le même : le
- * programme est déployé sur mainnet avec la même clé que sur devnet. */
 val networks = mapOf(
     "devnet" to mapOf(
         "rpcUrl" to "https://api.devnet.solana.com",
@@ -36,7 +28,6 @@ val networks = mapOf(
         "backendUrl" to "",
     ),
     "mainnet" to mapOf(
-        // Le RPC public limite fort : en production, surcharger avec un RPC payant.
         "rpcUrl" to "https://api.mainnet-beta.solana.com",
         "programId" to "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6",
         "skrMint" to "SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3",
@@ -46,25 +37,21 @@ val networks = mapOf(
 )
 
 android {
-    namespace = "com.clockin.hackathon"
+    namespace = "com.klementxv.moment"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.clockin.hackathon"
+        applicationId = "com.klementxv.moment"
         minSdk = 26
         targetSdk = 37
         versionCode = 3
         versionName = "0.3.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Les noms .skr se résolvent toujours sur mainnet, quel que soit le réseau de l'app.
         buildConfigField("String", "IDENTITY_RPC_URL",
-            "\"${localProperties.getProperty("clockin.identityRpcUrl") ?: "https://api.mainnet-beta.solana.com"}\"")
+            "\"${localProperties.getProperty("moment.identityRpcUrl") ?: "https://api.mainnet-beta.solana.com"}\"")
     }
 
-    // Deux builds : `devnet` (« Moment dev », installable à côté) et `mainnet`
-    // (production). Le réseau est figé dans l'APK : une build de production ne
-    // peut pas parler à devnet.
     flavorDimensions += "network"
     productFlavors {
         networks.forEach { (network, defaults) ->
@@ -76,12 +63,11 @@ android {
                 }
                 fun value(name: String) = setting(network, name, defaults.getValue(name))
                 val decimals = value("skrDecimals")
-                require(decimals.toIntOrNull() in 0..18) { "clockin.$network.skrDecimals doit être un entier entre 0 et 18" }
+                require(decimals.toIntOrNull() in 0..18) { "moment.$network.skrDecimals doit être un entier entre 0 et 18" }
                 buildConfigField("String", "NETWORK", "\"$network\"")
                 buildConfigField("String", "RPC_URL", "\"${value("rpcUrl")}\"")
                 buildConfigField("String", "PROGRAM_ID", "\"${value("programId")}\"")
                 buildConfigField("String", "SKR_MINT", "\"${value("skrMint")}\"")
-                // Décimales du mint avant sa première lecture : la chaîne fait foi ensuite.
                 buildConfigField("int", "SKR_DECIMALS", decimals)
                 buildConfigField("String", "BACKEND_URL", "\"${value("backendUrl")}\"")
             }
@@ -125,7 +111,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
 
-    // Solana Mobile Stack: Mobile Wallet Adapter + Kotlin client SDK
     implementation("com.solanamobile:mobile-wallet-adapter-clientlib-ktx:2.2.0")
     implementation("com.solanamobile:web3-solana:0.3.1")
     implementation("com.solanamobile:rpc-core:0.2.11")

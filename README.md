@@ -1,271 +1,253 @@
 # Moment
 
-Application Android native pour la communauté Seeker, basée sur le [plan produit](docs/superpowers/specs/2026-09-14-clock-in-design.md). Nom et direction graphique : [Moment](docs/moment-design.md).
+**A daily photo ritual for the Seeker community, powered by Solana.**
 
-## Version 0.3 — état on-chain sur devnet
+Built for the **Solana Mobile Clock In Hackathon**, Moment is a native Android app that connects everyday participation to a shared SKR pool. Capture your surroundings, take a selfie, and publish your daily Moment to unlock the community feed. Your wallet signs the publication, and a Solana program records your check-in and manages the pool.
 
-- Interface Kotlin / Compose : graphite, ivoire, menthe et lavande. Avant publication, **Home** montre un aperçu illustré flouté avec **Capturer mon Moment** au premier plan et une barre **Home + Capturer**. Après confirmation du check-in, retour sur Home déverrouillé et disparition de la barre jusqu’au prochain jour UTC. Un brouillon ne déverrouille pas Home.
-- Le profil s’ouvre par l’avatar en haut à droite ; il contient la série, le wallet et les règles. Il n’a pas de barre basse : flèche et retour Android ramènent à Home.
-- Échéances affichées dans le fuseau du téléphone, avec compte à rebours pendant les trois dernières heures. La fenêtre de publication du protocole reste calée sur minuit UTC. Les règles du pool journalier sont regroupées dans **Profil → Comment ça marche**.
-- **L'économie vit on-chain.** L'app lit `Config`, `Profile` et le `CheckIn` du jour par RPC devnet : solde, série, total, demande de sortie et compte à rebours viennent des comptes Solana. L'ancienne simulation Kotlin est supprimée.
-- Le solde affiché est celui **après le decay déjà dû** — ce que l'utilisateur a réellement, pas la valeur périmée stockée dans le compte. Le programme appliquera exactement le même calcul.
-- Transactions construites et envoyées par l'app : `create_profile`, `faucet`, `stake`, `check_in`, `request_exit`, `cancel_exit`, `finalize_exit`. Signature par le wallet via Mobile Wallet Adapter ; aucune clé privée d'utilisateur ne transite par l'app.
-- **Manifeste canonique `clockin-post-v1`** signé par le wallet en signature détachée. Son SHA-256 est le `commitment` inscrit on-chain. Format figé et documenté dans [docs/manifest-v1.md](docs/manifest-v1.md), verrouillé par un vecteur d'or calculé indépendamment.
-- Capture **CameraX réelle et séquentielle**, dans une **sheet plein écran** : scène arrière, puis selfie, déclencheur rond et miniature de la scène. L’aperçu et la photo partagent le même cadrage. Permissions à la demande, refus, retour depuis les réglages et erreurs caméra gérés. Aucun import galerie ni permission de localisation.
-- Normalisation de l'orientation, miroir du selfie, recadrage, réduction à 1280 pixels, conversion sRGB et nouveau JPEG. Suppression des segments APP/COM, puis contrôle des octets nettoyés.
-- Brouillon de capture chiffré **AES-256-GCM**, clé dans Android Keystore, fichier atomique dans `noBackupFilesDir`. Il ne contient plus aucun solde.
+## The experience
 
-### Intégration Android ↔ backend
+Moment gives the community a reason to show up together each day:
 
-L’app utilise maintenant le [backend Rust](keyserver/README.md) pour ouvrir une
-session signée par le wallet, déposer le paquet AES-256-GCM, obtenir la
-cosignature de `check_in`, confirmer la publication et lire le feed paginé.
-Le backend seul accède à R2. `blob_ref` contient le vrai hash du paquet chiffré.
-Aucune clé privée d’autorité de publication n’est embarquée, même en debug.
+1. **Connect your wallet.** Create your on-chain profile through Mobile Wallet Adapter.
+2. **Stake SKR.** Put a stake into the program's token vault to participate.
+3. **Capture your Moment.** Take a rear-camera photo followed by a selfie, directly in the app.
+4. **Publish and unlock the feed.** Review both photos, sign the publication, and see today's Moments from the community.
+5. **Keep the ritual going.** Track your streak, manage your stake, and return the next day.
 
-Une soumission est conservée atomiquement, chiffrée avec Android Keystore,
-avant son premier envoi. **Reprendre la publication** réutilise les mêmes
-photos, clé, nonce et références avec un blockhash récent. Si Solana a déjà
-confirmé, seule la confirmation backend est reprise. Les photos du feed sont
-vérifiées (hash, AES-GCM, manifeste, contexte et signature wallet) avant affichage.
+The app supports English and French. Publication days follow UTC; deadlines are displayed in the phone's local time zone.
 
-Le [guide de validation](docs/android-backend-integration.md) distingue les tests
-locaux du parcours physique à deux wallets. Ce dernier reste à exécuter avec
-une URL de backend configurée et un appareil connecté ; le déploiement R2 réel
-reste à préparer. La légende reste locale et ne fait pas partie du protocole v1.
+### The daily pool
 
-**Profil → Démo → Afficher de faux Moments** conserve l’aperçu illustré optionnel.
-Le mode normal utilise le feed distant ; le décor avant publication reste illustré.
+The devnet configuration uses the following rules:
 
-## Déploiement devnet
+| Rule | Value |
+| --- | --- |
+| Minimum stake | 500 test SKR |
+| Missed-day penalty | 10% of the remaining stake per missed day |
+| Pool distribution | Proportional to each publisher's stake for that day |
+| Pool closure | 06:00 UTC on the following day |
+| Withdrawal delay | 48 hours |
+| Devnet faucet | 1,000 test SKR |
 
-Le programme tourne sur devnet. Adresses, transactions de bootstrap et procédure
-de vérification : [docs/devnet-run.md](docs/devnet-run.md).
+Missed-day penalties fund the daily pool. Participants who publish that day can receive their share after the pool closes. Settlement and payouts are enforced by the Solana program; the backend's scheduled worker submits the transactions. Users can request or cancel a withdrawal from their profile.
 
-L'autorité de mint du SKR de test est le PDA `Config` : **seul le faucet du
-programme peut en créer**, l'admin compris. C'est ce qui rend le solde affiché
-digne de confiance.
+These parameters belong to the program configuration. Devnet uses a test mint; its tokens have no monetary value.
 
-Un test JVM décode le compte `Config` réel de devnet : si le décodeur Kotlin et
-le programme Rust divergent sur un champ, il tombe.
+## Solana Mobile integration
 
-## Essayer sur Seeker / émulateur
+- **Native Android:** Kotlin and Jetpack Compose, designed for Seeker.
+- **Wallet signing:** Mobile Wallet Adapter handles wallet authorization, message signing, and transaction signing. User private keys stay in the wallet.
+- **On-chain participation:** An Anchor program manages profiles, stakes, daily check-ins, pools, penalties, and withdrawals.
+- **Camera capture:** CameraX captures the rear photo and selfie sequentially, with review and retake controls.
+- **Wallet identity:** The profile can resolve eligible `.skr` names owned by the connected wallet on mainnet. A local display name remains available.
+- **Local photo analysis:** The bundled Marqo NSFW model runs through ONNX Runtime during photo review; the backend independently checks both photos before authorizing publication.
 
-Prérequis : un déploiement devnet renseigné dans `app/local.properties`
-(`clockin.rpcUrl`, `clockin.programId`, `clockin.skrMint`,
-`clockin.backendUrl`) et un wallet
-Solana Mobile installé.
+## Architecture
 
-L'unité du SKR vient du mint lu sur la chaîne : 9 décimales pour le mint de test
-devnet, 6 pour le vrai SKR. `clockin.skrDecimals` (9 par défaut, 6 pour une build
-mainnet) ne sert qu'à l'affichage avant cette lecture ; aucune mise ne part tant
-que le mint n'a pas été lu.
+```text
+Android app ── Mobile Wallet Adapter ── Wallet
+    │                                    │
+    │ authenticated requests             │ signed transactions
+    ▼                                    ▼
+Rust keyserver ── publication cosignature ── Solana / Anchor
+    │
+    ├── PostgreSQL: sessions, posts, encrypted photo keys
+    └── Private R2 bucket: encrypted photo packets
+```
 
-1. Installer l'APK, puis **Découvrir Moment**.
-2. Ouvrir le profil par l’avatar, recevoir 1000 SKR de test puis staker 500 SKR. Chaque étape est une transaction signée par le wallet.
-3. Revenir à Home et appuyer sur **Capturer mon Moment** ou **Capturer** pour ouvrir la sheet plein écran, autoriser la caméra, capturer la scène, puis prendre le selfie.
-4. Vérifier les deux images, reprendre si besoin, puis publier : le wallet signe la connexion au backend si nécessaire, le manifeste, puis la transaction `check_in` cosignée par le serveur.
-5. Vérifier le compte `CheckIn` du jour dans un explorateur devnet : son `commitment` est le SHA-256 du manifeste signé.
-6. Depuis le profil, essayer la demande de sortie et l'annulation. Le délai est réellement de 48 h.
+The wallet signs a canonical `moment-manifest-v1` manifest describing the photos. Its SHA-256 hash becomes the on-chain commitment. The app encrypts the photo packet, submits it to the keyserver, and obtains the publication authority's cosignature for `check_in`. The backend confirms the transaction before exposing the post in the feed.
 
-Après l’onboarding, la caméra peut aussi être ouverte avant de miser : l’aperçu propose alors **Continuer vers mon profil**. Le brouillon complet est conservé à la fermeture ; la croix, le retour système et le glissement depuis l’en-tête ramènent à Home.
+On-chain accounts hold the participation state and photo commitments. Photos are stored off-chain as encrypted packets. The backend checks a reader's on-chain eligibility before serving content; the app verifies the packet hash, manifest, wallet signature, and encryption integrity before displaying it.
 
-L’émulateur utilise ses caméras virtuelles ; rendu et latence restent à valider sur Seeker physique.
+### Privacy and trust
 
-## Compiler et tester
+Photos are re-encoded as JPEGs after orientation correction, cropping, and resizing to a maximum edge of 1,280 pixels. Metadata is removed before publication. Capture drafts and pending submissions are encrypted locally with keys held in Android Keystore, allowing an interrupted publication to resume.
 
-Ouvrir `app/` dans Android Studio, SDK Android 37 et JDK compatible avec Gradle 9.7.1 (JBR Android Studio utilisé ici).
+The keyserver is a trusted service: it can decrypt photos for moderation and control access to photo keys. R2 stores encrypted packets and receives no decryption keys. The app contains neither R2 credentials nor the publication authority's private key. Captions travel inside the encrypted packet and are outside the wallet-signed photo manifest.
 
-Deux builds, une par réseau, figées à la compilation :
+## Project status
 
-| Variante | Nom affiché | Identifiant Android | Réseau, mint |
-|---|---|---|---|
-| `devnet` | Moment dev | `com.clockin.hackathon.dev` | devnet, mint de test (9 décimales) |
-| `mainnet` | Moment | `com.clockin.hackathon` | mainnet, vrai SKR (6 décimales) |
+**Version 0.3.0 — devnet prototype.**
 
-Les deux s'installent côte à côte. Chaque valeur (`rpcUrl`, `programId`,
-`skrMint`, `skrDecimals`, `backendUrl`) se surcharge par
-`clockin.<réseau>.<nom>` dans `local.properties`, ou par la variable
-d'environnement `CLOCKIN_<RÉSEAU>_<NOM>` en CI (par exemple
-`CLOCKIN_MAINNET_RPC_URL`). Les anciennes clés `clockin.<nom>` restent lues pour
-devnet. Une app installée avant ces variantes (identifiant
-`com.clockin.hackathon`, devnet) est à désinstaller : la build mainnet la
-remplacerait.
+The repository includes the Android app, Anchor program, Rust backend, Docker image definition, and Kubernetes Helm chart. Wallet transactions, camera capture, encrypted publication, backend authorization, and feed retrieval are implemented.
+
+The current Android devnet defaults are:
+
+| Setting | Value |
+| --- | --- |
+| Program ID | `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6` |
+| Test SKR mint | `FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5` |
+| Test mint decimals | 9 |
+
+The backend URL must be configured to publish and retrieve real Moments. A complete run with two physical wallets and a deployed R2 backend remains to be validated. Moderation thresholds are experimental and require calibration before production publication. The mainnet build variant is included, but a production deployment is still pending.
+
+## Run the Android app
+
+### Prerequisites
+
+- Android Studio, Android SDK 37, and JDK 17 or a compatible Android Studio JBR.
+- An Android device running Android 8.0 or later; Seeker is the target device.
+- A wallet compatible with Mobile Wallet Adapter, with devnet SOL for transaction fees.
+- A running devnet keyserver whose publication authority matches the program configuration, for real publication and feed access.
+
+### Configure
+
+Open `app/` in Android Studio. Add the following settings to `app/local.properties`, alongside the SDK path created by Android Studio:
+
+```properties
+moment.devnet.rpcUrl=https://api.devnet.solana.com
+moment.devnet.programId=ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6
+moment.devnet.skrMint=FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5
+moment.devnet.skrDecimals=9
+moment.devnet.backendUrl=https://YOUR_DEVNET_BACKEND
+```
+
+Replace the backend placeholder with your service URL. If you deploy your own program and test mint, update those addresses too. `local.properties` is ignored by Git.
+
+Settings can also be supplied through environment variables such as `MOMENT_DEVNET_BACKEND_URL` and `MOMENT_DEVNET_RPC_URL`. Network-specific properties take precedence over environment variables. The app reads the mint's actual decimals on-chain before allowing staking.
+
+### Build and install
 
 ```sh
 cd app
-./gradlew :app:assembleDevnetDebug :app:testDevnetDebugUnitTest :app:testMainnetDebugUnitTest :app:lintDevnetDebug
-# Avec un appareil / émulateur connecté :
-./gradlew :app:connectedDevnetDebugAndroidTest
+./gradlew :app:assembleDevnetDebug
 ```
 
-APK : `app/app/build/outputs/apk/devnet/debug/app-devnet-debug.apk` et
-`app/app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk`.
+The APK is written to `app/app/build/outputs/apk/devnet/debug/app-devnet-debug.apk`, relative to the repository root.
 
-### Installer sur le Seeker
-
-Brancher le Seeker en USB, activer le débogage USB et accepter l’autorisation de l’ordinateur sur le téléphone. Depuis la racine du dépôt :
+To build, install, and launch on a USB-connected Seeker, enable USB debugging and run from the repository root:
 
 ```sh
 ./scripts/push-seeker.sh
-./scripts/push-seeker.sh --no-build
-./scripts/push-seeker.sh --serial SERIAL --no-launch
 ```
 
-Le script détecte le Seeker, compile l’APK debug, l’installe en conservant les données et ouvre Moment. `--no-build` réutilise l’APK existant ; `--no-launch` laisse l’application fermée. ADB est recherché dans le PATH puis dans le SDK Android ; sur macOS, le JDK d’Android Studio est utilisé si `JAVA_HOME` n’est pas défini.
+Use `--no-build` to install an existing APK, `--no-launch` to install without opening the app, or `--serial SERIAL` to select a device.
 
-### Vérifications
+| Variant | App name | Application ID | Build task |
+| --- | --- | --- | --- |
+| Devnet | Moment dev | `com.klementxv.moment.dev` | `:app:assembleDevnetDebug` |
+| Mainnet | Moment | `com.klementxv.moment` | `:app:assembleMainnetDebug` |
 
-- **87 tests JVM** : Base58, discriminants Anchor recroisés avec l'IDL, encodage des instructions, décodage des comptes et solde après decay, client RPC sur pilote injecté, manifeste canonique et son vecteur d'or, assemblage et réparation de signatures, Ed25519 sur vecteurs RFC 8032, format local borné et chiffrement, et distribution déterministe du feed de démo.
-- **21 tests Android** : rotation et miroir, recadrage/résolution, GPS/identité/date, segments XMP/IPTC/commentaires, chiffrement Android Keystore, onboarding, feed de démo et funnel quotidien (barre conditionnelle, accès au profil et retour, CTA et confidentialité de l’aperçu). Suite validée sur émulateur Android 16 ; exécution sur Seeker interrompue par le verrouillage puis la déconnexion USB.
-- Android Lint sans erreur.
+The variants install side by side. Mainnet settings use the `moment.mainnet.*` properties or `MOMENT_MAINNET_*` environment variables. Configure a deployed mainnet program and backend before using that variant.
 
-## Intégration continue
+### Demo walkthrough
 
-`.github/workflows/ci.yml`, à chaque push et pull request :
+1. Open **Moment dev**, complete onboarding, and connect your wallet.
+2. Open your profile, claim test SKR from the devnet faucet, and stake at least 500 test SKR.
+3. Select **Capture my moment**, allow camera access, take the rear photo, then the selfie.
+4. Review the pair and publish. Approve the wallet prompts for authentication, the manifest, and the transaction as requested.
+5. After confirmation, browse the unlocked community feed and inspect your updated profile.
+6. Try requesting and cancelling a withdrawal to explore the stake lifecycle.
 
-- **Programme** : `cargo build-sbf --arch v0` (Agave 4.1.2), clippy, tests litesvm.
-- **Keyserver** : clippy et tests, contre un PostgreSQL 17 de service.
-- **Chart Helm** : `tests/render.py`.
-- **App Android** : tests unitaires des deux variantes, lint, puis les APK
-  `devnet` et `mainnet` (debug) en artefacts, gardés 14 jours.
-- **Image du keyserver** : sur push de la branche principale ou d'un tag `v*`,
-  et seulement si le keyserver et le chart passent, publiée sur
-  `ghcr.io/<propriétaire>/moment-keyserver` (tags `sha-…`, branche, version).
-  Dans le chart : `image.repository=ghcr.io/<propriétaire>/moment-keyserver`.
+For an interface preview, the profile also provides an optional demo feed with illustrated sample Moments. Those samples do not represent real publications or on-chain activity.
 
-Réglages du dépôt GitHub, tous facultatifs : variables `CLOCKIN_DEVNET_BACKEND_URL`
-et `CLOCKIN_MAINNET_BACKEND_URL`, secret `CLOCKIN_MAINNET_RPC_URL` (RPC payant
-avec jeton). Sans eux, les APK gardent les valeurs par défaut de chaque réseau.
+## Backend and program setup
 
-## Programme on-chain (devnet)
+### Keyserver
 
-Programme Anchor `clockin` : `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6`.
+The backend uses Rust, Axum, PostgreSQL 17, ONNX Runtime CPU 1.23.2, and either local blob storage or a private Cloudflare R2 bucket.
 
-Comptes : `Config` (PDA singleton, paramètres), `Profile` (PDA par wallet, avec ses
-créances sur les pools), `DayPool` (PDA par jour : mises des publieurs et pénalités
-des absents), `CheckIn` (PDA par couple wallet × jour, portant le commitment et la
-référence du blob). Tout le SKR vit dans un vault SPL unique ; le decay et les parts
-sont de la comptabilité, seuls `stake`, `seed_pool`, `faucet` et `finalize_exit`
-déplacent réellement des tokens.
+```sh
+cd keyserver
+cargo build --locked --release
+mkdir -p data secrets
+chmod 700 data secrets
+cp .env.example .env
+chmod 600 .env
+```
 
-**Pool journalier** : qui ne publie pas le jour D perd 10 % de sa mise. Ces pénalités
-forment le pool de D, partagé entre les publieurs de D au prorata de leur mise et
-réclamable après sa clôture (D+1 06:00 UTC). Le keyserver lance `reap` à 00:05 et à
-06:05 UTC pour régler les absents et verser les parts. Voir
-`docs/superpowers/specs/2026-09-24-pool-journalier-design.md`.
+Configure `.env` with the database connection, RPC endpoint, publication authority keypair, encryption key, storage settings, and native ONNX Runtime library path. The authority must match the program's `Config.publication_authority`. The server does not automatically load `.env`; source it before starting:
 
-Instructions : `initialize_config`, `update_config`, `set_publication_authority`,
-`seed_pool`, `create_profile`, `faucet`, `stake`, `check_in`, `close_check_in`, `reap`,
-`open_day_pool`, `roll_over_day_pool`, `request_exit`, `cancel_exit`, `finalize_exit`.
+```sh
+set -a
+. ./.env
+set +a
+./target/release/moment-keyserver
+```
 
-`open_day_pool` crée le pool du jour (le crank le fait à 00:05 : le premier
-publieur ne paie plus sa rente). `roll_over_day_pool` reverse un pool clôturé
-sans aucun publieur (amorçage ou pénalités) dans le pool du jour, au lieu de le
-laisser bloqué. Le délai de clôture est d'au moins 1 h et figé au déploiement.
+For local devnet development, `BLOB_STORE=local` enables local encrypted storage. The experimental moderation policy requires the explicit devnet-only setting `ALLOW_UNCALIBRATED_MODERATION=true`; the backend rejects that setting on mainnet.
 
-`close_check_in` (permissionless, à partir de J+2) ferme un `CheckIn` que plus rien
-ne relit et rend sa rente (≈ 0,0013 SOL) à son propriétaire ; le crank du keyserver
-le fait à chaque passage.
+Detailed configuration and API documentation are in the [keyserver README](keyserver/README.md). Kubernetes deployment is documented in the [Helm chart README](keyserver/helm/moment-keyserver/README.md).
 
-`check_in` exige une **co-signature de l'autorité de publication** : un client modifié
-ne peut ni publier ni prendre part au pool sans le contrôle serveur.
+### Anchor program
 
-Paramètres en vigueur : staking minimum 500 SKR, pénalité 10 % par jour manqué bornée
-à 30 jours, clôture du pool à D+1 06:00 UTC, sortie à 48 h, faucet 1000 SKR.
+The program uses four account types:
+
+| Account | Purpose |
+| --- | --- |
+| `Config` | Token mint, publication authority, and economic parameters |
+| `Profile` | Wallet participation, stake, streak, withdrawal state, and pending pool claims |
+| `DayPool` | Daily stake totals and penalties available for distribution |
+| `CheckIn` | Wallet/day publication commitment and encrypted packet reference |
+
+Build with the SBPF v0 target used by the repository's LiteSVM tests:
 
 ```sh
 cd program
-anchor build --arch v0 && cargo test
+anchor build --arch v0
 ```
 
-**L'architecture SBPF doit rester v0** : `anchor build` cible v3 par défaut, que le
-runtime embarqué dans litesvm refuse de charger. Voir
-[la décision](docs/decisions/2026-09-15-architecture-sbpf.md).
+Initial configuration must be signed by the program’s current upgrade authority, before making the program immutable. The bootstrap instruction includes the program-data account to enforce this on-chain.
 
-58 tests : 13 unitaires sur l'économie pure, 45 d'intégration sous litesvm
-(configuration, profil, faucet, mise, check-in, decay, reap, sorties, invariant de
-conservation du vault).
-
-Le développement suit les [plans](docs/superpowers/plans/2026-09-15-00-feuille-de-route.md).
-
-## Prochains lots
-
-1. Exécuter le [parcours Android/backend à deux wallets](docs/android-backend-integration.md)
-   sur un appareil connecté et un backend devnet réel ; l’intégration est codée
-   et les contrats sont testés localement.
-2. Déployer le keyserver avec R2 privé, configurer l'autorité de publication
-   on-chain et valider le parcours avec deux wallets devnet
-   ([plan 03](docs/superpowers/plans/2026-09-15-03-keyserver-et-feed.md)).
-3. Calibrer la modération, ajouter l'écran de vérification par divulgation
-   sélective et explorer Seed Vault
-   ([plan 04](docs/superpowers/plans/2026-09-15-04-differenciation-et-livrables.md)).
-4. Validation du mode double caméra sur Seeker physique.
-
-Les paramètres économiques restent provisoires et vivent dans `Config`, donc
-calibrables sur devnet sans redéploiement.
-
-## Références techniques
-
-- [CameraX 1.6.2](https://developer.android.com/jetpack/androidx/releases/camera)
-- [Capture d’image CameraX](https://developer.android.com/media/camera/camerax/take-photo)
-- [Rotation CameraX](https://developer.android.com/media/camera/camerax/orientation-rotation)
-
-## Aperçus
-
-Funnel quotidien : [Home verrouillé](docs/screenshots/funnel/01-home-locked.png) · [Home après check-in avec exemples](docs/screenshots/funnel/02-home-unlocked.png). Captures des composants réels dans le harnais de test Android, avec un état de check-in fourni par le test.
-
-Navigation et capture plein écran : [barre de navigation](docs/screenshots/capture-sheet/01-navigation.png) · [caméra](docs/screenshots/capture-sheet/02-camera.png) · [aperçu des deux photos](docs/screenshots/capture-sheet/03-review.png). Les motifs colorés sont ceux des caméras virtuelles de l’émulateur.
-
-[Design Moment](docs/screenshots/moment/01-onboarding.png) · [Profil](docs/screenshots/moment/05-profile.png).
-Les anciens aperçus restent conservés dans `docs/screenshots/` ; ils correspondent aux lots précédents.
-
-### Caméras de l’émulateur
-
-L’AVD du dossier était configuré sans caméra avant. Pour tester les deux prises sans modifier sa configuration sauvegardée :
+The [devnet deployment script](program/scripts/deploy-devnet.sh) builds and deploys the program, creates a test mint, initializes the configuration, seeds the pool, and transfers test-mint authority to the program. It requires the Solana, SPL Token, and Anchor CLIs, a funded devnet admin wallet, and the bootstrap dependencies:
 
 ```sh
-emulator -avd ClockIn_Pixel7Pro_API36 -camera-front emulated -camera-back emulated -no-snapshot
+cd program/scripts
+npm ci
+cd ../..
+PUBLICATION_AUTHORITY=YOUR_PUBLICATION_AUTHORITY_PUBLIC_KEY ./program/scripts/deploy-devnet.sh
 ```
 
-L’app détecte les caméras manquantes et borne l’attente de l’aperçu à 12 secondes avec un message de nouvelle tentative. Le motif coloré montré dans les captures de test provient des caméras virtuelles Android, pas des anciennes illustrations intégrées à l’app.
+Use the resulting program and mint addresses in both the app and keyserver configuration.
 
-### Validation du lot capture
+## Tests and continuous integration
 
-Le parcours a été rejoué avec les deux caméras virtuelles : refus puis accord de permission, scène → selfie, agrandissement, reprise de la paire, sauvegarde, fermeture forcée puis restauration. Le dernier contrôle retrouve le snapshot chiffré dans `no_backup/moment-local.bin` et les deux photos dans l’app.
+The repository contains tests for wallet signatures, transaction encoding, account layouts, pool accounting, encrypted storage, publication retries, backend authorization, photo preprocessing, and Android UI flows.
 
-[Aperçu des photos](docs/screenshots/camera/04-review.png) · [Moment restauré après redémarrage](docs/screenshots/camera/06-restored.png).
+Android unit tests and lint:
 
-25 tests réussis (20 JVM + 5 Android), compilation réussie et aucune alerte Lint. Validation sur Seeker physique encore nécessaire.
+```sh
+cd app
+./gradlew :app:testDevnetDebugUnitTest :app:testMainnetDebugUnitTest :app:lintDevnetDebug
+```
 
-### Identité du profil
+Android instrumented tests, with a device or emulator connected:
 
-Le profil recherche automatiquement les noms `.skr` détenus par le wallet sur
-Solana mainnet, indépendamment du réseau des transactions. Un pseudo local reste
-prioritaire ; « Utiliser … .skr » rétablit le nom automatique. Les noms expirés
-sont ignorés et, si plusieurs noms sont trouvés, le premier par ordre alphabétique
-est affiché. Les domaines tokenisés et les photos AllDomains ne sont pas résolus.
+```sh
+cd app
+./gradlew :app:connectedDevnetDebugAndroidTest
+```
 
-La recherche utilise le RPC public mainnet par défaut. `clockin.identityRpcUrl`
-dans `app/local.properties` permet de choisir un endpoint mainnet autorisant
-`getProgramAccounts` et `getMultipleAccounts`. Cette URL est embarquée dans l’APK :
-utiliser un proxy pour protéger une éventuelle clé privée de fournisseur RPC.
-Une panne de résolution laisse le pseudo utilisable et propose de réessayer.
+Program tests:
 
-Intégration Marqo locale : [ONNX Runtime et prétraitement](docs/local-nsfw-integration.md).
+```sh
+cd program
+anchor build --arch v0
+cargo test -p moment
+```
 
-### Analyse locale des photos
+Backend tests:
 
-Marqo NSFW est embarqué en FP32 et analyse les deux vues pendant la prévisualisation.
-Le moteur retenu est ONNX Runtime CPU / 4 threads : 329 ms par paire en médiane
-sur le Seeker testé.
+```sh
+cd keyserver
+cargo test --locked
+```
 
-Les seuils de `assets/moderation/policy.json` sont expérimentaux et ne sont pas
-calibrés. La vraie publication release reste désactivée tant que cette calibration
-n’est pas validée. [Implémentation, mesures et outil de calibration](docs/local-nsfw-integration.md).
+Backend database integration tests use `TEST_DATABASE_URL` for a dedicated PostgreSQL test database. Native moderation tests also require the ONNX Runtime library configured through `ORT_DYLIB_PATH`.
 
-## Licence
+The [CI workflow](.github/workflows/ci.yml) builds the program, runs Rust checks and tests, validates the Helm chart, and builds both Android variants. Android APKs are uploaded as workflow artifacts. After the backend and Helm jobs pass, pushes can also publish the keyserver image to GitHub Container Registry.
 
-Apache-2.0 (`LICENSE`, `NOTICE`), pour tout le dépôt. Le modèle de modération
-embarqué (`app/app/src/main/assets/moderation/`, Marqo/nsfw-image-detection-384)
-est lui aussi sous Apache-2.0 et garde son propre `LICENSE.txt` et `NOTICE.txt`.
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| [`app/`](app/) | Native Android app, resources, bundled moderation model, and tests |
+| [`program/`](program/) | Anchor program, LiteSVM tests, and deployment tools |
+| [`keyserver/`](keyserver/) | Publication backend, SQL migrations, Docker configuration, and Helm chart |
+| [`scripts/`](scripts/) | Seeker installation and moderation model export/calibration tools |
+
+## License
+
+Moment is licensed under [Apache-2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
+
+The bundled `Marqo/nsfw-image-detection-384` moderation model is also licensed under Apache-2.0 and includes its own [license](app/app/src/main/assets/moderation/LICENSE.txt) and [notice](app/app/src/main/assets/moderation/NOTICE.txt).

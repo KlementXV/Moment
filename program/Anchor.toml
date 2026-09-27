@@ -7,10 +7,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-clockin = "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"
+moment = "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"
 
 [programs.localnet]
-clockin = "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"
+moment = "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6"
 
 [provider]
 cluster = "localnet"

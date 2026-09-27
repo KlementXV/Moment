@@ -1,5 +1,4 @@
 # syntax=docker/dockerfile:1.7
-# Build from repository root: docker build -f keyserver/Dockerfile -t moment-keyserver:0.1.0 .
 FROM rust:1.98.1-slim-bookworm AS build
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends pkg-config ca-certificates \
@@ -17,7 +16,6 @@ FROM debian:bookworm-slim AS onnx
 ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-# Digests from the official Microsoft release API, not a checksum fetched during build.
 RUN set -eu; \
     case "$TARGETARCH" in \
       amd64) ort_arch=x64; ort_sha=1fa4dcaef22f6f7d5cd81b28c2800414350c10116f5fdd46a2160082551c5f9b ;; \

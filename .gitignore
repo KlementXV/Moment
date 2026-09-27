@@ -18,7 +18,7 @@ program/node_modules/
 # macOS
 .DS_Store
 
-# Clés locales de développement : jamais commitées
+# Local development keys: never commit
 keys/
 
 # Local moderation export tooling

@@ -21,7 +21,6 @@ pub struct Settings {
     pub policy: PathBuf,
     pub ort_library: PathBuf,
     pub allow_uncalibrated: bool,
-    /// Fee payer of the daily `reap` crank; `None` disables the crank.
     pub crank: Option<SigningKey>,
 }
 pub enum Storage {
@@ -41,7 +40,6 @@ fn required(name: &str) -> anyhow::Result<String> {
         .with_context(|| format!("Variable {name} manquante"))
 }
 
-/// Errors intentionally do not include URL values, credentials or key material.
 fn check_url(value: &str, allow_local: bool) -> anyhow::Result<()> {
     let url =
         reqwest::Url::parse(value).map_err(|_| anyhow::anyhow!("URL de configuration invalide"))?;
@@ -170,8 +168,6 @@ impl Settings {
     }
 }
 
-/// `crank` mode: only what the daily reap needs. No database, no model, and
-/// the co-signing key is not even mounted.
 pub struct CrankSettings {
     pub rpc_url: String,
     pub program: Key,
@@ -207,7 +203,6 @@ impl CrankSettings {
     }
 }
 
-/// Solana CLI keypair file: a JSON array of 64 bytes.
 fn load_keypair(path: &str) -> anyhow::Result<SigningKey> {
     let bytes = Zeroizing::new(std::fs::read(path).context("Impossible de lire la clé")?);
     let decoded: Zeroizing<Vec<u8>> =
@@ -221,7 +216,6 @@ fn load_keypair(path: &str) -> anyhow::Result<SigningKey> {
     SigningKey::from_keypair_bytes(&pair).context("Clé Solana incohérente")
 }
 
-/// The crank pays fees from its own key: the co-signing key stays off that path.
 fn crank_key(path: Option<String>, authority: &SigningKey) -> anyhow::Result<Option<SigningKey>> {
     let Some(path) = path.filter(|p| !p.trim().is_empty()) else {
         return Ok(None);

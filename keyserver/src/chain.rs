@@ -1,4 +1,3 @@
-//! Strict, purpose-limited Solana RPC and legacy check-in co-signing.
 use crate::{
     error::{Error, Result},
     protocol::{self, Key, Reader},
@@ -14,7 +13,6 @@ pub struct Config {
     pub min_stake: u64,
     pub decay_bps: u16,
     pub max_decay_days: u8,
-    /// Seconds after the end of day D before its pool closes (daily pool spec).
     pub pool_close_delay: i64,
 }
 #[derive(Clone, Debug)]
@@ -24,7 +22,6 @@ pub struct Profile {
     pub settled_day: i64,
     pub exit_unlock_at: i64,
     pub active: bool,
-    /// Claims on the pools of published days, `-1` for a free slot.
     pub pending_days: [i64; 2],
     pub pending_stakes: [u64; 2],
 }
@@ -38,7 +35,6 @@ pub const DAY: i64 = 86_400;
 pub fn closes_at(day: i64, delay: i64) -> i64 {
     day.saturating_add(1).saturating_mul(DAY).saturating_add(delay)
 }
-/// Same formula as the program: pro rata, rounded down, never above the pool.
 pub fn share(penalties: u64, stake: u64, total_stake: u64) -> u64 {
     if total_stake == 0 {
         return 0;
@@ -54,7 +50,6 @@ impl Profile {
             yesterday
         }
     }
-    /// Claims whose pool is closed, as `(day, stake)`.
     pub fn closed_claims(&self, config: &Config, now: i64) -> Vec<(i64, u64)> {
         (0..2)
             .filter(|&i| {
@@ -64,10 +59,6 @@ impl Profile {
             .map(|i| (self.pending_days[i], self.pending_stakes[i]))
             .collect()
     }
-    /// Pools a settling instruction carries, as `(day, writable)`: every claim
-    /// (read) and the settle bound while a day is missed (written). No clock
-    /// filter: the program ignores what it does not need, and a pool closing
-    /// while the transaction is in flight must not make it fail.
     pub fn settlement_pools(&self, bound: i64) -> Vec<(i64, bool)> {
         let mut pools: Vec<(i64, bool)> = self
             .pending_days
@@ -80,14 +71,11 @@ impl Profile {
         }
         pools
     }
-    /// A late day to settle or a closed claim to pay out: `reap` would succeed.
-    /// A zero balance loses nothing: settling it would only cost fees.
     pub fn needs_reap(&self, config: &Config, now: i64) -> bool {
         self.active
             && ((self.staked > 0 && self.settle_bound(now.div_euclid(DAY)) > self.settled_day)
                 || !self.closed_claims(config, now).is_empty())
     }
-    /// `gains` are the closed claims, credited by the program before the decay.
     pub fn eligible(&self, config: &Config, now: i64, gains: u64) -> bool {
         if !self.active
             || config.decay_bps > 10_000
@@ -140,24 +128,16 @@ pub struct Expected {
     pub day: i64,
     pub commitment: Key,
     pub blob_ref: Key,
-    /// Days whose `DayPool` may ride along as a settlement account (claims and
-    /// the last missed day). Today's pool is a named account, never an extra.
     pub pools: Vec<i64>,
 }
 
-/// ComputeBudget111111111111111111111111111111
 const COMPUTE_BUDGET: Key = [
     3, 6, 70, 111, 229, 33, 23, 50, 255, 236, 173, 186, 114, 195, 155, 231, 188, 140, 229, 187,
     197, 247, 18, 107, 44, 67, 155, 58, 64, 0, 0, 0,
 ];
-/// Bounds on priority fees paid by the wallet (the authority never pays).
 const MAX_COMPUTE_UNITS: u32 = 400_000;
 const MAX_MICRO_LAMPORTS: u64 = 1_000_000;
 
-/// Validates a legacy `check_in` transaction by meaning, not by byte layout:
-/// wallets (Seeker, web3.js) re-sort account keys and add priority fees, so
-/// the account order may vary. Only one `check_in` plus at most one
-/// SetComputeUnitLimit and one SetComputeUnitPrice are accepted.
 pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
     if raw.len() > 1232 {
         return Err(invalid());
@@ -244,7 +224,6 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
                         0 => index != 0,
                         1 => index != 1,
                         3..=5 => !writable_unsigned(index),
-                        // config (no longer written by the program) and system_program
                         _ => !readonly_nonsigner(index),
                     }
                 {
@@ -252,7 +231,6 @@ pub fn validate_transaction(raw: &[u8], expected: &Expected) -> Result<Key> {
                 }
                 used[index] = true;
             }
-            // Settlement pools: only the allowed days, each at most once.
             let mut extras: Vec<Key> = Vec::new();
             for _ in 7..accounts {
                 let index = r.u8()? as usize;
@@ -322,14 +300,9 @@ pub struct RpcChain {
     client: reqwest::Client,
     url: String,
     program: Key,
-    /// Comptes récemment lus. Un chargement du feed relit les mêmes PDA (config,
-    /// profil, check-ins) pour la liste puis pour chaque blob : sans ce cache, le
-    /// RPC public (≈40 getAccountInfo / 10 s par IP) répond 429 dès quelques posts.
     accounts: std::sync::Mutex<std::collections::HashMap<Key, (std::time::Instant, Vec<u8>)>>,
 }
-/// Assez court pour qu'une mise ou une sortie se voie presque aussitôt.
 const ACCOUNT_TTL: std::time::Duration = std::time::Duration::from_secs(5);
-/// Réessais après un 429 du RPC, avant d'abandonner en 503.
 const RATE_LIMIT_RETRIES: [u64; 2] = [400, 1200];
 impl RpcChain {
     pub fn new(url: String, program: Key) -> Result<Self> {
@@ -349,8 +322,6 @@ impl RpcChain {
             accounts: Default::default(),
         })
     }
-    /// Pin the RPC to its full genesis hash (CAIP-2 network names are truncated).
-    /// Verified against api.devnet.solana.com / api.mainnet-beta.solana.com.
     pub async fn verify_network(&self, network: &str) -> Result<()> {
         let expected = match network {
             "devnet" => "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG",
@@ -406,8 +377,6 @@ impl RpcChain {
             }
         }
         let bytes = self.fetch_account(address, name, len).await?;
-        // Seuls les comptes existants sont gardés : un check-in tout juste créé
-        // doit être vu dès la lecture suivante.
         if let (Some(bytes), Ok(mut cache)) = (&bytes, self.accounts.lock()) {
             let now = std::time::Instant::now();
             cache.retain(|_, (at, _)| now.duration_since(*at) < ACCOUNT_TTL);
@@ -512,7 +481,6 @@ impl Chain for RpcChain {
     }
 }
 
-/// Largest `getProgramAccounts` answer the crank accepts (~40k profiles).
 const PROFILES_MAX_BYTES: usize = 8 * 1024 * 1024;
 #[async_trait]
 impl crate::crank::CrankChain for RpcChain {
@@ -532,7 +500,6 @@ impl crate::crank::CrankChain for RpcChain {
             )
             .await?;
         let entries = result.as_array().ok_or_else(Error::unavailable)?;
-        // One unreadable account must not stop the others from being settled.
         Ok(entries
             .iter()
             .filter_map(|entry| entry["account"]["data"][0].as_str())
@@ -572,7 +539,6 @@ impl crate::crank::CrankChain for RpcChain {
             .collect())
     }
     async fn check_ins(&self) -> Result<Vec<(Key, i64)>> {
-        // Only owner and day (bytes 8..48): the answer stays small.
         let filters = json!([
             {"dataSize": CHECK_IN_LEN},
             {"memcmp": {"offset": 0, "bytes": bs58::encode(discriminator("account:CheckIn")).into_string()}}
@@ -611,7 +577,6 @@ pub const CONFIG_LEN: usize = 174;
 pub const PROFILE_LEN: usize = 127;
 pub const DAY_POOL_LEN: usize = 37;
 pub const CHECK_IN_LEN: usize = 124;
-/// Anchor layout of `Config`; returns the stored bump, which callers check.
 pub fn decode_config(bytes: &[u8]) -> Result<(Config, u8)> {
     if bytes.len() != CONFIG_LEN || bytes[..8] != discriminator("account:Config") {
         return Err(Error::unavailable());
@@ -709,8 +674,6 @@ mod tests {
         };
         (check_in_raw(&e, None), e, owner, authority)
     }
-    /// Canonical `check_in`: writable PDAs first, then config and system read-only.
-    /// `extra` is appended as a read-only account right before the program.
     fn check_in_raw(e: &Expected, extra: Option<Key>) -> Vec<u8> {
         let mut keys = vec![
             e.wallet,
@@ -804,7 +767,6 @@ mod tests {
             );
         }
     }
-    /// Same shape as the Seeker wallet output: keys re-sorted, priority fees first.
     fn wallet_shaped(e: &Expected, price: u64) -> Vec<u8> {
         let keys = [
             e.wallet,
@@ -847,7 +809,7 @@ mod tests {
         protocol::verify(&e.authority, &signed[129..], &signed[65..129]).unwrap();
         assert!(validate_transaction(&wallet_shaped(&e, MAX_MICRO_LAMPORTS + 1), &e).is_err());
         let mut writable_config = wallet_shaped(&e, 100_000);
-        writable_config[131] = 3; // config would become writable
+        writable_config[131] = 3;
         assert!(validate_transaction(&writable_config, &e).is_err());
     }
     fn layout(name: &str) -> Vec<u8> {
@@ -910,10 +872,7 @@ mod tests {
     #[test]
     fn settlement_pools_never_depend_on_the_clock() {
         let mut p = pool_profile();
-        // Published on 98 and 99 (99 still open), then nothing to settle.
         assert_eq!(p.settlement_pools(99), vec![(98, false), (99, false)]);
-        // Published on 98, absent on 99: the pool of 99 rides along writable even
-        // if it may have closed by the time the transaction lands.
         p.settled_day = 98;
         p.pending_days = [98, -1];
         assert_eq!(p.settlement_pools(99), vec![(98, false), (99, true)]);
@@ -934,13 +893,11 @@ mod tests {
     }
     #[test]
     fn a_zero_balance_profile_is_not_reaped_for_nothing() {
-        // Sa pénalité vaut zéro : un reap ne ferait que payer des frais.
         let c = pool_config();
         let mut p = pool_profile();
         p.pending_days = [-1, -1];
         p.staked = 0;
         assert!(!p.needs_reap(&c, 101 * 86_400 + 60));
-        // Une part clôturée à encaisser justifie toujours le reap.
         p.pending_days = [99, -1];
         assert!(p.needs_reap(&c, 101 * 86_400 + 60));
     }
@@ -971,7 +928,7 @@ mod tests {
             pending_days: [-1, -1],
             pending_stakes: [0, 0],
         };
-        assert!(p.eligible(&config, 100 * 86_400, 0)); // floor(75 * .75) = 56
+        assert!(p.eligible(&config, 100 * 86_400, 0));
         p.staked = 99;
         assert!(!p.eligible(&config, 100 * 86_400, 0));
         p.staked = 100;
@@ -1157,7 +1114,6 @@ mod tests {
             task.abort();
         }
         for len in [7, 94, 95, 96] {
-            // Includes exact length with a wrong discriminator, plus truncated/oversized data.
             let response = json!({"result":{"value":{"owner":protocol::address_string(&[9;32]),"executable":false,"data":[protocol::b64(&vec![0;len]),"base64"]}}});
             let (chain, task) = mock_rpc(response).await;
             assert!(chain.profile([8; 32]).await.is_err());

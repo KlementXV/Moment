@@ -47,8 +47,6 @@ def component(docs, name, kind="Deployment"):
 def validate_crank(docs, network_policy=False):
     crank = component(docs, "crank")
     assert crank is not None, "le crank reap doit tourner dans son propre Deployment"
-    # Une seule instance, jamais deux pendant un déploiement : sinon chaque
-    # reap part en double et le doublon paie des frais pour échouer.
     assert crank["spec"]["replicas"] == 1
     assert crank["spec"]["strategy"]["type"] == "Recreate"
     spec = crank["spec"]["template"]["spec"]
@@ -101,10 +99,8 @@ def validate_common(docs):
 def strict_schema(node):
     if not isinstance(node, dict):
         return
-    # CRD metadata and intentionally arbitrary maps must remain open.
     if node.get("properties") and "additionalProperties" not in node and not node.get("x-kubernetes-preserve-unknown-fields"):
         node["additionalProperties"] = False
-    # OpenAPI nullable -> JSON schema type union.
     if node.get("nullable") and isinstance(node.get("type"), str):
         node["type"] = [node["type"], "null"]
     for value in node.values():

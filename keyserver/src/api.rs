@@ -65,7 +65,6 @@ impl App {
             .ok_or_else(Error::auth)?;
         protocol::address(&self.db.session(token.to_owned(), self.clock.now()).await?)
     }
-    // A successful chain read grants access only until midnight or the known exit time.
     async fn reader(&self, wallet: Key, day: i64) -> Result<i64> {
         if day != self.day() {
             return Err(Error::forbidden());
@@ -105,7 +104,6 @@ impl App {
     }
 }
 
-/// Gains the program will credit before checking `min_stake`.
 async fn closed_gains(chain: &dyn Chain, profile: &Profile, config: &Config, now: i64) -> Result<u64> {
     let mut total = 0u64;
     for (day, stake) in profile.closed_claims(config, now) {
@@ -116,8 +114,6 @@ async fn closed_gains(chain: &dyn Chain, profile: &Profile, config: &Config, now
     Ok(total)
 }
 
-// Walk from the TCP peer toward the client, stopping at the first untrusted hop.
-// Never use client-controlled leftmost entries without checking the proxy chain.
 fn client_ip(peer: IpAddr, headers: &HeaderMap, trusted: &[IpNet]) -> Result<IpAddr> {
     let peer = peer.to_canonical();
     let is_trusted = |ip: IpAddr| trusted.iter().any(|net| net.contains(&ip));
@@ -153,7 +149,6 @@ fn client_ip(peer: IpAddr, headers: &HeaderMap, trusted: &[IpNet]) -> Result<IpA
     Ok(client)
 }
 
-/// Bounded admission; forwarded IPs are accepted only from configured proxy networks.
 #[derive(Clone)]
 struct Admission {
     slots: Arc<Semaphore>,
@@ -161,7 +156,6 @@ struct Admission {
     peers: Arc<Mutex<HashMap<IpAddr, (Instant, u32)>>>,
 }
 async fn guard(State(admission): State<Admission>, request: Request, next: Next) -> Response {
-    // Load shedding must not turn a healthy process into a Kubernetes restart loop.
     if matches!(request.uri().path(), "/healthz" | "/readyz") {
         let mut response = tokio::time::timeout(Duration::from_secs(3), next.run(request))
             .await
@@ -207,7 +201,6 @@ async fn guard(State(admission): State<Admission>, request: Request, next: Next)
         Ok(r) => r,
         Err(e) => e.into_response(),
     };
-    // Normalize framework rejections as well: no English parser internals in the API.
     if response.status().is_client_error()
         && response
             .headers()
@@ -294,7 +287,7 @@ struct VerifyInput {
     nonce: String,
     signature: String,
 }
-const SESSION_TTL_SECONDS: i64 = 30 * 86_400;
+const SESSION_TTL_SECONDS: i64 = 15 * 60;
 
 async fn verify_session(
     State(app): State<Arc<App>>,
@@ -316,8 +309,6 @@ async fn verify_session(
         &protocol::unbase64(&input.signature, 64)?,
     )?;
     let token = protocol::random_token();
-    // La session fait office de connexion côté app : trop courte, elle ferait
-    // resigner dans le wallet à chaque ouverture.
     let expires = now + SESSION_TTL_SECONDS;
     app.db
         .consume_nonce(wallet_string, input.nonce, token.clone(), expires, now)
@@ -368,14 +359,11 @@ async fn submit(
         ));
     }
     let transaction = protocol::unbase64(&input.transaction, 1232)?;
-    // The chain is read first: the allowed settlement pools depend on the profile.
     let (config, profile) = tokio::try_join!(app.chain.config(), app.chain.profile(wallet))?;
     let authority = app.authority.verifying_key().to_bytes();
     if config.authority != authority {
         return Err(Error::unavailable());
     }
-    // Every claim and the settle bound are allowed, not only those the client must
-    // carry: a claim closing between build and validation must not fail the post.
     let mut pools: Vec<i64> = profile
         .iter()
         .flat_map(|p| p.pending_days)
@@ -410,13 +398,20 @@ async fn submit(
         .try_acquire_owned()
         .map_err(|_| Error::unavailable())?;
     let reviewer = app.reviewer.clone();
-    tokio::task::spawn_blocking(move || {
+    let review = tokio::task::spawn_blocking(move || {
         let _slot = slot;
         reviewer.review(&packet.rear, &packet.front)
     })
     .await
-    .map_err(|_| Error::unavailable())??;
-    // Check again after native inference: do not authorize yesterday's packet near midnight.
+    .map_err(|_| Error::unavailable())?;
+    if let Err(error) = review {
+        // A retry after a policy change must retain an already reserved packet:
+        // its earlier cosignature may still be submitted or confirmed.
+        if app.db.get_post(input.commitment.clone()).await?.is_some() {
+            return Err(Error::conflict());
+        }
+        return Err(error);
+    }
     if input.day != app.day() {
         return Err(Error::bad(
             "Le jour a changé. Reprenez la publication du jour.",
@@ -456,7 +451,6 @@ async fn confirm(
             "Le Moment n’est pas confirmé sur Solana. Attendez puis réessayez.",
         ));
     }
-    // Also verify the object before opening access (retrying an interrupted upload is safe).
     app.blobs.get(protocol::hash_hex(&record.blob_ref)?).await?;
     app.db.mark_published(commitment).await?;
     Ok(Json(json!({"state":"published"})))
@@ -506,8 +500,6 @@ async fn feed(
     let more = records.len() > limit;
     let records: Vec<_> = records.into_iter().take(limit).collect();
     let cursor = records.last().map(|record| record.commitment.clone());
-    // Ordered, bounded futures: preserve pagination and cancel outstanding reads on
-    // error/timeout. No detached tasks may release keys after the request ends.
     let items: Vec<Option<FeedItem>> = stream::iter(records)
         .map(|record| {
             let app = &app;
@@ -566,7 +558,6 @@ async fn unlike(
 ) -> Result<Json<serde_json::Value>> {
     set_like(app, headers, commitment, false).await
 }
-/// Same access rule as the feed: only today's members may like today's posts.
 async fn set_like(
     app: Arc<App>,
     headers: HeaderMap,
@@ -643,7 +634,6 @@ mod proxy_tests {
             client_ip("10.1.2.4".parse().unwrap(), &headers, &trusted).unwrap(),
             "198.51.100.7".parse::<IpAddr>().unwrap()
         );
-        // An untrusted peer cannot replace its quota identity, even with garbage.
         headers.insert("x-forwarded-for", "forged".parse().unwrap());
         assert_eq!(
             client_ip("203.0.113.1".parse().unwrap(), &headers, &trusted).unwrap(),

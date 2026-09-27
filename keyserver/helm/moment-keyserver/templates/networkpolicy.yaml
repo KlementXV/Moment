@@ -42,7 +42,6 @@ spec:
         - port: 5432
           protocol: TCP
     {{- end }}
-    # RPC and R2 endpoints can change addresses; standard NetworkPolicy has no FQDN selectors.
     - ports:
         - port: 443
           protocol: TCP

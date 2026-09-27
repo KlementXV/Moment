@@ -39,7 +39,6 @@ def evaluate(csv_path, session, crop):
         pair = []
         for camera in ("rear", "front"):
             with Image.open(csv_path.parent / row[camera]) as source:
-                # This tool evaluates the same sanitized <=1280 JPEGs as the app.
                 if source.format != "JPEG" or max(source.size) > 1280 or source.getexif():
                     raise ValueError("Use sanitized JPEGs <=1280 with no EXIF, as produced by PhotoSanitizer")
                 image = source.convert("RGB")

@@ -245,7 +245,6 @@ impl Harness {
         let manifest = manifest(PROGRAM, wallet, DAY, [salt; 16], &rear, &front);
         let signature = user.sign(&manifest).to_bytes();
         let mut packet = protocol::PACKET_DOMAIN.to_vec();
-        // Odd salts use packet v2 (with caption), even salts keep v1 covered.
         let caption: &[u8] = "Légende ✓".as_bytes();
         packet.push(if salt % 2 == 1 { 2 } else { 1 });
         for bytes in [&manifest[..], &signature, &rear, &front] {
@@ -370,10 +369,10 @@ fn manifest_replays_android_golden_commitment() {
         "arrière".as_bytes(),
         b"selfie",
     );
-    assert_eq!(m.len(), 175);
+    assert_eq!(m.len(), 178);
     assert_eq!(
         hex::encode(protocol::hash(&m)),
-        "cd6e5720f11bf646617ef9ebf69bf2cfdf656cc36f1421e9cf6954fd8e69f093"
+        "5de9efcc791d4672569365d2c31f352d54b822208369f52807bc24abb3b85eb5"
     );
 }
 
@@ -596,7 +595,7 @@ async fn identical_retry_accepts_fresh_blockhash_but_second_post_conflicts() {
         .await;
     assert_eq!(first["transaction"], second["transaction"]);
     let mut raw = protocol::unbase64(input["transaction"].as_str().unwrap(), 1232).unwrap();
-    raw[389..421].fill(2); // blockhash, after 8 keys
+    raw[389..421].fill(2);
     input["transaction"] = json!(protocol::b64(&raw));
     let (status, fresh) = h.request("POST", "/v1/posts", Some(&token), input).await;
     assert_eq!(status, StatusCode::OK);
@@ -631,12 +630,11 @@ async fn tampered_key_hash_signature_transaction_and_day_are_refused_without_res
             "{field}"
         );
     }
-    // Keep ciphertext/hash/transaction consistent but corrupt the detached manifest signature.
     let key = protocol::key64(original["postKey"].as_str().unwrap()).unwrap();
     let cipher =
         protocol::unbase64(original["blob"].as_str().unwrap(), protocol::MAX_BLOB).unwrap();
     let mut plain = protocol::open(&cipher, &key, protocol::PACKET_DOMAIN).unwrap();
-    plain[protocol::PACKET_DOMAIN.len() + 1 + 4 + 175 + 4] ^= 1;
+    plain[protocol::PACKET_DOMAIN.len() + 1 + 4 + 178 + 4] ^= 1;
     let cipher = protocol::seal(&plain, &key, protocol::PACKET_DOMAIN).unwrap();
     let blob_ref = protocol::hash(&cipher);
     let commitment = protocol::hash_hex(original["commitment"].as_str().unwrap()).unwrap();
@@ -795,7 +793,11 @@ async fn session_replay_wrong_signer_unknown_expiry_and_token_expiry() {
     );
     let session = if a.0 == StatusCode::OK { a.1 } else { b.1 };
     let token = session["token"].as_str().unwrap();
-    h.clock.0.fetch_add(30 * 86_400 + 1, Ordering::SeqCst);
+    assert_eq!(session["expiresAt"].as_i64().unwrap(), h.clock.now() + 900);
+    assert!(challenge["message"].as_str().unwrap().contains("15 minutes"));
+    h.clock.0.fetch_add(899, Ordering::SeqCst);
+    assert!(h.app.db.session(token.to_owned(), h.clock.now()).await.is_ok());
+    h.clock.0.fetch_add(1, Ordering::SeqCst);
     assert_eq!(
         h.request(
             "GET",
@@ -893,7 +895,6 @@ async fn exit_unlocking_during_response_preparation_releases_nothing() {
         format!("/v1/blobs/{}", post["blobRef"].as_str().unwrap()),
     ] {
         h.clock.0.store(start, Ordering::SeqCst);
-        // Initial reader check succeeds. The subsequent publisher check finishes at unlock.
         *h.chain.advance_after_reads.lock().unwrap() = Some((2, h.clock.clone(), start + 5));
         let (status, response) = h.request("GET", &path, Some(&token), json!(null)).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{path}: {response}");
@@ -907,7 +908,7 @@ fn packet_authentication_and_bounded_decoder_reject_truncation_trailing_bytes_an
     let key = [8; 32];
     let mut bytes = protocol::PACKET_DOMAIN.to_vec();
     bytes.push(1);
-    for field in [&[1u8; 175][..], &[2u8; 64], &[3u8; 7], &[4u8; 8]] {
+    for field in [&[1u8; 178][..], &[2u8; 64], &[3u8; 7], &[4u8; 8]] {
         bytes.extend_from_slice(&(field.len() as u32).to_le_bytes());
         bytes.extend_from_slice(field);
     }
@@ -1031,7 +1032,6 @@ async fn feed_parallel_reads_are_bounded_ordered_and_paginated() {
         .collect();
     assert_eq!(actual, expected[16..]);
     assert!(page["nextCursor"].is_null());
-    // A failure in a publisher read must return no partial keys and cancel work.
     let failing_wallet = h
         .chain
         .checkins
@@ -1041,7 +1041,6 @@ async fn feed_parallel_reads_are_bounded_ordered_and_paginated() {
         .find(|checkin| hex::encode(checkin.commitment) == expected[0])
         .unwrap()
         .owner;
-    // Use another reader if the last published wallet happens to sort first.
     let reader = SigningKey::from_bytes(&[41; 32]);
     let alternate = h.auth(&reader).await;
     let reader = if reader.verifying_key().to_bytes() != failing_wallet {
@@ -1061,4 +1060,15 @@ async fn feed_parallel_reads_are_bounded_ordered_and_paginated() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(response.get("items").is_none());
     assert_eq!(h.chain.active_reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn a_moderation_retry_preserves_an_already_authorized_packet() {
+    let h = Harness::new().await;
+    let user = SigningKey::from_bytes(&[1; 32]);
+    let token = h.auth(&user).await;
+    let input = h.submission(&user, 10);
+    assert_eq!(h.request("POST", "/v1/posts", Some(&token), input.clone()).await.0, StatusCode::OK);
+    h.reviewer.0.store(false, Ordering::SeqCst);
+    assert_eq!(h.request("POST", "/v1/posts", Some(&token), input).await.0, StatusCode::CONFLICT);
 }

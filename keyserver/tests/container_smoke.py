@@ -38,7 +38,6 @@ def b58(raw):
 
 
 def config_pda():
-    # Solana rejects PDA hashes decompressible as Edwards25519 points.
     prime = 2 ** 255 - 19
     d = -121665 * pow(121666, prime - 2, prime) % prime
     for bump in range(255, -1, -1):

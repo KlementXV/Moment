@@ -1,5 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- La build devnet s'installe à côté de la production : son nom la distingue. -->
     <string name="app_name">Moment dev</string>
 </resources>

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APK="$ROOT_DIR/app/app/build/outputs/apk/debug/app-debug.apk"
+APK="$ROOT_DIR/app/app/build/outputs/apk/devnet/debug/app-devnet-debug.apk"
 SERIAL="${ANDROID_SERIAL:-}"
 BUILD=true
 LAUNCH=true
@@ -11,9 +11,9 @@ usage() {
     cat <<'USAGE'
 Usage: ./scripts/push-seeker.sh [--serial SERIAL] [--no-build] [--no-launch]
 
-Compile Moment en debug, l’installe sur le Seeker et ouvre l’application.
+Compile Moment dev en debug, l’installe sur le Seeker et ouvre l’application.
   --serial SERIAL  Choisir explicitement l’appareil (ou définir ANDROID_SERIAL).
-  --no-build       Installer l’APK debug existant sans recompiler.
+  --no-build       Installer l’APK devnet debug existant sans recompiler.
   --no-launch      Installer sans ouvrir l’application.
   -h, --help       Afficher cette aide.
 
@@ -78,13 +78,13 @@ if "$BUILD"; then
         export JAVA_HOME='/Applications/Android Studio.app/Contents/jbr/Contents/Home'
     fi
     printf 'Compilation de Moment…\n'
-    (cd "$ROOT_DIR/app" && ./gradlew :app:assembleDebug)
+    (cd "$ROOT_DIR/app" && ./gradlew :app:assembleDevnetDebug)
 fi
 [[ -f "$APK" ]] || fail "APK absent : $APK. Relance sans --no-build."
 
 printf 'Installation sur %s…\n' "$SERIAL"
 "$ADB" -s "$SERIAL" install -r "$APK"
 if "$LAUNCH"; then
-    "$ADB" -s "$SERIAL" shell am start -W -n com.clockin.hackathon/.MainActivity
+    "$ADB" -s "$SERIAL" shell am start -W -n com.klementxv.moment.dev/com.klementxv.moment.MainActivity
 fi
-printf 'Moment installé sur %s.\n' "$SERIAL"
+printf 'Moment dev installé sur %s.\n' "$SERIAL"

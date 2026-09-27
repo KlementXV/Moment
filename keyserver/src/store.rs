@@ -1,4 +1,3 @@
-//! Private content-addressed storage and encrypted key custody.
 use crate::{
     error::{Error, Result},
     protocol::{self, Key, MAX_BLOB},
@@ -18,7 +17,6 @@ use std::{sync::Arc, time::Duration};
 use zeroize::Zeroizing;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-// Serializes admission across independent pools/pods. The transaction releases it automatically.
 const CHALLENGE_ADMISSION_LOCK: i64 = 0x4d4f_4d45_4e54_0001;
 
 #[derive(Clone, Debug)]
@@ -57,7 +55,6 @@ pub struct Db {
     master: Arc<Zeroizing<Key>>,
 }
 impl Db {
-    /// The URL supports sslmode=verify-full and sslrootcert for CNPG's server CA.
     pub async fn open(url: &str, master_key: Key) -> Result<Self> {
         let options = url.parse::<PgConnectOptions>().map_err(db_error)?;
         Self::connect(options, 10, master_key).await
@@ -76,7 +73,6 @@ impl Db {
             .acquire_timeout(Duration::from_secs(10))
             .after_connect(|connection, _| {
                 Box::pin(async move {
-                    // Bound waits on failed or contending peers even when a request is cancelled.
                     sqlx::query("SET statement_timeout = '15s'")
                         .execute(&mut *connection)
                         .await?;
@@ -96,7 +92,6 @@ impl Db {
             )
             .await
             .map_err(db_error)?;
-        // SQLx takes PostgreSQL's advisory migration lock before checking/applying migrations.
         if MIGRATOR.run(&pool).await.is_err() {
             pool.close().await;
             return Err(Error::internal());
@@ -111,7 +106,6 @@ impl Db {
     async fn verify_master(&self) -> Result<()> {
         let proposed = protocol::seal(b"moment-keyserver", &self.master, b"moment-master-key-v1")?;
         let mut tx = self.pool.begin().await.map_err(db_error)?;
-        // Concurrent startup may propose different ciphertexts. Only the persisted winner matters.
         sqlx::query("INSERT INTO metadata(id,marker) VALUES(1,$1) ON CONFLICT (id) DO NOTHING")
             .bind(proposed)
             .execute(&mut *tx)
@@ -242,8 +236,6 @@ impl Db {
         let key = Zeroizing::new(key);
         let wrapped = protocol::seal(key.as_slice(), &self.master, &aad(&post))?;
         let mut tx = self.pool.begin().await.map_err(db_error)?;
-        // Unique constraints serialize conflicting reservations across pods. A later SELECT gets
-        // a fresh READ COMMITTED snapshot after any competing INSERT has committed.
         sqlx::query(
             "INSERT INTO posts(commitment,wallet,day,blob_ref,wrapped_key,created)
             VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
@@ -350,7 +342,6 @@ impl Db {
         query.execute(&self.pool).await.map_err(db_error)?;
         Ok(())
     }
-    /// Like count and whether `wallet` liked, for each requested post.
     pub async fn likes(
         &self,
         commitments: Vec<String>,
@@ -556,7 +547,6 @@ mod tests {
     #[tokio::test]
     async fn migrations_and_master_initialization_are_safe_across_pools() {
         let test = TestDatabase::create().await;
-        // Both independent pools apply migrations and initialize the same marker concurrently.
         let (first, second) = tokio::join!(test.connect([7; 32]), test.connect([7; 32]));
         first.health().await.unwrap();
         second.health().await.unwrap();
@@ -846,7 +836,6 @@ mod tests {
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        // Only this test bypasses HTTPS. All other production builder options remain identical.
         let store = ObjectBlobs {
             store: Arc::new(
                 ObjectBlobs::r2_builder(&endpoint, "private-bucket", "test-access", "test-secret")

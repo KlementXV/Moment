@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "clock-in"
+rootProject.name = "Moment"
 include(":app")

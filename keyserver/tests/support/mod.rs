@@ -4,7 +4,6 @@ use sqlx::{
     PgPool,
 };
 
-/// Each API test owns a PostgreSQL schema. TEST_DATABASE_URL must target a disposable DB.
 pub struct Database {
     pub db: Db,
     admin: PgPool,
@@ -33,7 +32,6 @@ impl Database {
 }
 impl Drop for Database {
     fn drop(&mut self) {
-        // Best-effort cleanup when a test panics too. The disposable service is the final boundary.
         let pool = self.admin.clone();
         let schema = self.schema.clone();
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {

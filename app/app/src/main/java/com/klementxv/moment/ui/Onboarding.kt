@@ -1,0 +1,691 @@
+package com.klementxv.moment.ui
+
+import com.klementxv.moment.i18n.Message
+import com.klementxv.moment.i18n.tr
+import com.klementxv.moment.i18n.AppLanguage
+
+import android.Manifest
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.klementxv.moment.R
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.AccountBalanceWallet
+import androidx.compose.material.icons.outlined.Bolt
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.NotificationsNone
+import androidx.compose.material.icons.outlined.PersonOutline
+import androidx.compose.material.icons.outlined.PhotoCamera
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationManagerCompat
+import com.klementxv.moment.ChainState
+
+internal enum class OnboardingStep {
+    Splash, Langue, Moment, Cercle, Mise, Pool, Conditions, Wallet, Stake, Permissions, Start;
+
+    val number: Int? get() =
+        if (ordinal in Moment.ordinal..Permissions.ordinal) ordinal - Moment.ordinal + 1 else null
+
+    companion object { const val COUNT = 8 }
+}
+
+@Composable
+internal fun Onboarding(
+    wallet: String?,
+    state: ChainState,
+    now: Long,
+    busy: Boolean,
+    error: String?,
+    resumeAtStake: Boolean,
+    onConnect: () -> Unit,
+    onStake: (Long) -> Unit,
+    onFaucet: () -> Unit,
+    onDisconnect: () -> Unit,
+    onFinish: (openCapture: Boolean) -> Unit,
+) {
+    val context = LocalContext.current
+    val device = AppLanguage.deviceCode
+    var step by rememberSaveable {
+        mutableStateOf(if (resumeAtStake) OnboardingStep.Stake else OnboardingStep.Splash)
+    }
+    var accepted by rememberSaveable { mutableStateOf(false) }
+    var reading by rememberSaveable { mutableStateOf<String?>(null) }
+    var permissionsAsked by rememberSaveable { mutableStateOf(false) }
+    var staking by rememberSaveable { mutableStateOf(false) }
+
+    fun go(next: OnboardingStep) { step = next }
+
+    fun settled(candidate: OnboardingStep) = candidate == OnboardingStep.Wallet && wallet != null
+
+    fun back() {
+        var target = step.ordinal - 1
+        while (target > 0 && settled(OnboardingStep.entries[target])) target--
+        if (target >= 0) step = OnboardingStep.entries[target]
+    }
+
+    LaunchedEffect(resumeAtStake) {
+        if (resumeAtStake && step == OnboardingStep.Splash) go(OnboardingStep.Stake)
+    }
+    LaunchedEffect(wallet, step) { if (wallet != null && step == OnboardingStep.Wallet) go(OnboardingStep.Stake) }
+    LaunchedEffect(state.active, staking) {
+        if (state.active && staking) { staking = false; go(OnboardingStep.Permissions) }
+    }
+
+    val permissions = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { go(OnboardingStep.Start) }
+    val settings = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()) { go(OnboardingStep.Start) }
+
+    BackHandler(enabled = step != OnboardingStep.Splash || reading != null) {
+        if (reading != null) reading = null else back()
+    }
+
+    reading?.let { document ->
+        LegalText(document, onClose = { reading = null })
+        return
+    }
+
+    AnimatedContent(
+        targetState = step, label = "onboarding",
+        transitionSpec = { fadeIn(tween(220, delayMillis = 60)) togetherWith fadeOut(tween(140)) },
+    ) { current ->
+        when (current) {
+            OnboardingStep.Splash -> Splash(onStart = { go(OnboardingStep.Langue) })
+
+            OnboardingStep.Langue -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.ChooseYourLanguage),
+                body = tr(Message.YouCanChangeItLaterInSettings),
+                titleFirst = true,
+                illustration = {
+                    LanguagePicker(AppLanguage.code, device, onSelect = AppLanguage::select)
+                },
+                actions = { PrimaryButton(tr(Message.Continue)) { go(OnboardingStep.Moment) } },
+            )
+
+            OnboardingStep.Moment -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.OneMomentADay),
+                body = tr(Message.OnboardingCaptureExplanation),
+                illustration = { MomentPreview() },
+                actions = { PrimaryButton(tr(Message.Continue)) { go(OnboardingStep.Cercle) } },
+            )
+
+            OnboardingStep.Cercle -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.OneSharedCircle),
+                body = tr(Message.OnboardingCircleExplanation),
+                illustration = { CirclePreview() },
+                actions = { PrimaryButton(tr(Message.Continue)) { go(OnboardingStep.Mise) } },
+            )
+
+            OnboardingStep.Mise -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.PlayWithAStake),
+                body = tr(Message.OnboardingStakeExplanation, skr(state.minStake), decayPercent(state)),
+                illustration = { StakePreview(state) },
+                actions = { PrimaryButton(tr(Message.Continue)) { go(OnboardingStep.Pool) } },
+            )
+
+            OnboardingStep.Pool -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.PostAndGetYourShare),
+                body = tr(Message.PenaltiesFormAPoolEveryDayThose),
+                illustration = { PoolPreview() },
+                actions = { PrimaryButton(tr(Message.Continue)) { go(OnboardingStep.Conditions) } },
+            )
+
+            OnboardingStep.Conditions -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.BeforeYouPlay),
+                body = tr(Message.OnboardingTermsExplanation),
+                titleFirst = true,
+                illustration = {
+                    Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
+                        RuleRows(
+                            Triple(Icons.Outlined.Lock, tr(Message.YourStake), tr(Message.ADayWithoutAMomentCosts, decayPercent(state))),
+                            Triple(Icons.Outlined.Share, tr(Message.YourMoments), tr(Message.VisibleToEveryoneInTheCircle)),
+                            Triple(Icons.Outlined.PersonOutline, tr(Message.YourData), tr(Message.YourWalletAddressIsVisibleOnYour)),
+                        )
+                        Row(Modifier.offset(x = (-12).dp)) {
+                            TextButton(onClick = { reading = "conditions" }) { Text(tr(Message.ReadTheTerms), color = Accent) }
+                            TextButton(onClick = { reading = "confidentialité" }) { Text(tr(Message.ReadThePrivacyPolicy), color = Accent) }
+                        }
+                    }
+                },
+                actions = {
+                    AcceptCheckbox(accepted, onToggle = { accepted = it })
+                    Spacer(Modifier.height(12.dp))
+                    PrimaryButton(tr(Message.Continue), enabled = accepted) { go(OnboardingStep.Wallet) }
+                },
+            )
+
+            OnboardingStep.Wallet -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.ConnectYourWallet),
+                body = tr(Message.OnboardingWalletExplanation),
+                error = error,
+                illustration = { BadgeTile(Icons.Outlined.AccountBalanceWallet, tr(Message.Wallet)) },
+                actions = {
+                    PrimaryButton(
+                        if (busy) tr(Message.Connecting) else tr(Message.ConnectMyWallet),
+                        enabled = !busy, loading = busy, onClick = onConnect,
+                    )
+                    Text(tr(Message.NetworkFeesInSolAreShownBefore),
+                        Modifier.fillMaxWidth().padding(top = 12.dp),
+                        color = Muted, style = BodySm, textAlign = TextAlign.Center)
+                },
+            )
+
+            OnboardingStep.Start -> FirstMoment(state, now, onFinish = onFinish)
+
+            OnboardingStep.Stake -> StakeStep(
+                step = current, state = state, busy = busy, error = error,
+                onBack = ::back,
+                onStake = { staking = true; onStake(it) },
+                onContinue = { go(OnboardingStep.Permissions) },
+                onFaucet = onFaucet, onDisconnect = onDisconnect,
+            )
+
+            OnboardingStep.Permissions -> StepScaffold(
+                step = current, onBack = ::back,
+                title = tr(Message.TwoPermissions),
+                body = tr(Message.OnboardingPermissionsExplanation),
+                illustration = {
+                    PermissionCards(
+                        Triple(Icons.Outlined.PhotoCamera, tr(Message.Camera), tr(Message.ForYourPhotoAndSelfie)),
+                        Triple(Icons.Outlined.NotificationsNone, tr(Message.Notifications), tr(Message.ToNotifyYouBeforeTheDayEnds)),
+                    )
+                },
+                actions = {
+                    PrimaryButton(if (permissionsAsked) tr(Message.OpenSettings) else tr(Message.Allow)) {
+                        if (permissionsAsked) {
+                            settings.launch(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName))
+                        } else {
+                            permissionsAsked = true
+                            permissions.launch(buildList {
+                                add(Manifest.permission.CAMERA)
+                                if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+                            }.toTypedArray())
+                        }
+                    }
+                    if (permissionsAsked) TextButton(
+                        onClick = { go(OnboardingStep.Start) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                    ) { Text(tr(Message.ContinueWithoutPermissions), color = Muted) }
+                },
+            )
+        }
+    }
+}
+
+private fun decayPercent(state: ChainState): Int = state.decayBps / 100
+
+
+@Composable
+private fun StepScaffold(
+    step: OnboardingStep,
+    onBack: () -> Unit,
+    title: String,
+    body: String,
+    illustration: @Composable () -> Unit,
+    actions: @Composable ColumnScope.() -> Unit,
+    titleFirst: Boolean = false,
+    error: String? = null,
+) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 24.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = tr(Message.Back), tint = White)
+            }
+            step.number?.let { Progress(it, Modifier.weight(1f)) }
+        }
+        val heading = @Composable {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(title, style = DisplayMd)
+                Text(body, color = Muted, style = BodyLg)
+                if (error != null) Text(error, color = Danger, style = BodyMd)
+            }
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)) {
+            if (titleFirst) {
+                Spacer(Modifier.height(24.dp))
+                heading()
+                Spacer(Modifier.height(24.dp))
+                illustration()
+                Spacer(Modifier.height(24.dp))
+            } else {
+                Box(Modifier.weight(1f, fill = false).fillMaxWidth().padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center) { illustration() }
+                heading()
+                Spacer(Modifier.height(32.dp))
+            }
+        }
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
+            content = actions)
+    }
+}
+
+@Composable
+private fun Progress(current: Int, modifier: Modifier = Modifier) {
+    Row(modifier.semantics { contentDescription = tr(Message.StepOf, current, OnboardingStep.COUNT) },
+        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        repeat(OnboardingStep.COUNT) { index ->
+            val done = index < current
+            val color by animateColorAsState(if (done) Accent else SurfaceHigh, tween(300), label = "segment")
+            Box(Modifier.weight(1f).height(4.dp).clip(CircleShape).background(color))
+        }
+    }
+}
+
+
+@Composable
+private fun Splash(onStart: () -> Unit) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(40.dp))
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Image(painterResource(R.drawable.ic_splash_logo), contentDescription = tr(Message.MomentLogo),
+                modifier = Modifier.size(200.dp))
+        }
+        Column(Modifier.padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr(Message.OneMomentADay2), style = DisplayLg)
+            Text(tr(Message.CaptureYourLifeShareItWithEveryone),
+                color = Muted, style = BodyLg)
+        }
+        Column(Modifier.padding(bottom = 24.dp)) { PrimaryButton(tr(Message.GetStarted), onClick = onStart) }
+    }
+}
+
+@Composable
+internal fun SignIn(wallet: String, busy: Boolean, error: String?, onSignIn: () -> Unit, onChangeWallet: () -> Unit) {
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 16.dp)) {
+        Spacer(Modifier.height(40.dp))
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Image(painterResource(R.drawable.ic_splash_logo), contentDescription = tr(Message.MomentLogo),
+                modifier = Modifier.size(200.dp))
+        }
+        Column(Modifier.padding(bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr(Message.SignInTitle), style = DisplayLg)
+            Text(tr(Message.SignInExplanation), color = Muted, style = BodyLg)
+            Text(wallet.take(6) + "…" + wallet.takeLast(4), color = Muted, style = BodyMd)
+            if (error != null) Text(error, color = Danger, style = BodyMd)
+        }
+        Column(Modifier.padding(bottom = 24.dp)) {
+            PrimaryButton(if (busy) tr(Message.Signing) else tr(Message.SignInWithMyWallet),
+                enabled = !busy, loading = busy, onClick = onSignIn)
+            TextButton(onClick = onChangeWallet, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+                Text(tr(Message.ChangeWallet), color = Muted)
+            }
+        }
+    }
+}
+
+@Composable
+internal fun LanguagePicker(selected: String, device: String, onSelect: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().selectableGroup()
+        .semantics { contentDescription = tr(Message.AppLanguage) },
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        AppLanguage.supported.forEach { code ->
+            val name = if (code == "fr") "Français" else "English"
+            val translated = if (code == "fr") tr(Message.French) else tr(Message.English)
+            val note = if (code == device) tr(Message.DeviceLanguage) else translated
+            val on = code == selected
+            Row(Modifier.fillMaxWidth().clip(RadiusLg)
+                .background(if (on) AccentContainer else Panel)
+                .selectable(on, role = Role.RadioButton) { onSelect(code) }
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(Modifier.weight(1f)) {
+                    Text(name, style = TitleMd, color = if (on) OnAccentContainer else White)
+                    Text(note, style = BodyMd, color = if (on) OnAccentContainer.copy(alpha = .7f) else Muted)
+                }
+                if (on) Icon(Icons.Outlined.Check, contentDescription = null, tint = OnAccentContainer)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MomentPreview() {
+    Box(Modifier.width(240.dp).aspectRatio(4f / 5f).clip(RadiusXl)
+        .background(Brush.linearGradient(listOf(Coral.copy(alpha = .24f), OnBrand)))) {
+        Icon(Icons.Outlined.PhotoCamera, contentDescription = null, tint = White.copy(alpha = .24f),
+            modifier = Modifier.align(Alignment.Center).size(72.dp))
+        Box(Modifier.align(Alignment.TopStart).padding(12.dp).fillMaxWidth(.28f).aspectRatio(3f / 4f)
+            .clip(RadiusLg).background(OnBrand).border(2.dp, Color.White, RadiusLg),
+            contentAlignment = Alignment.Center) {
+            Icon(Icons.Outlined.PersonOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(24.dp))
+        }
+        Text(tr(Message.Today2), Modifier.align(Alignment.BottomStart).padding(12.dp)
+            .clip(CircleShape).background(Color.Black.copy(alpha = .6f))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+            color = Color.White, style = BodySm, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun CirclePreview() {
+    data class Member(val name: String, val when_: String, val tag: String?, val boosted: Boolean)
+    val people = listOf(
+        Member("Léa Martin", tr(Message.DemoTwelveMinutesAgo), tr(Message.Favorite), false),
+        Member("Tom Perrin", tr(Message.DemoThirtyEightMinutesAgo), tr(Message.Boosted), true),
+        Member("Inès Caron", tr(Message.DemoFortyOneMinutesAgo), tr(Message.Favorite), false),
+        Member("Nolan Roux", tr(Message.HAgo), null, false),
+    )
+    Column(Modifier.fillMaxWidth().clip(Radius2xl).background(Panel).padding(horizontal = 16.dp)) {
+        people.forEachIndexed { index, person ->
+            if (index > 0) HorizontalDivider(color = Line)
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(40.dp).clip(CircleShape).background(GradientBrand).padding(2.dp),
+                    contentAlignment = Alignment.Center) {
+                    Box(Modifier.fillMaxSize().clip(CircleShape).background(SurfaceHigh),
+                        contentAlignment = Alignment.Center) {
+                        Text(person.name.take(1), style = TitleSm, color = White)
+                    }
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(person.name, style = TitleMd)
+                    Text(person.when_, style = BodyMd, color = Muted)
+                }
+                person.tag?.let {
+                    Tag(it, if (person.boosted) Icons.Outlined.Bolt else Icons.Outlined.Star,
+                        if (person.boosted) SuccessContainer else SurfaceHigh,
+                        if (person.boosted) OnSuccessContainer else White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Tag(label: String, icon: ImageVector, background: Color, content: Color) {
+    Row(Modifier.clip(CircleShape).background(background).padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(14.dp))
+        Text(label, color = content, style = BodySm, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun StakePreview(state: ChainState) {
+    Column(Modifier.fillMaxWidth().clip(Radius2xl).background(Panel).padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(tr(Message.YourActiveStake), style = TitleSm, color = Muted)
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(skr(state.minStake), fontSize = 32.sp, lineHeight = 36.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = (-.32).sp)
+            Text("SKR", Modifier.padding(bottom = 4.dp), style = TitleSm, color = Muted)
+        }
+        Text(tr(Message.ADayWithoutAMomentCosts, decayPercent(state)), style = BodyMd, color = Muted)
+    }
+}
+
+@Composable
+private fun PoolPreview() {
+    Column(Modifier.fillMaxWidth().clip(Radius2xl).background(Panel).padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.size(32.dp).clip(CircleShape).background(SurfaceHigh), contentAlignment = Alignment.Center) {
+                Icon(Icons.Outlined.Bolt, contentDescription = null, tint = White, modifier = Modifier.size(18.dp))
+            }
+            Text(tr(Message.YesterdaySPool), style = TitleSm, color = Muted)
+        }
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("1 240", fontSize = 32.sp, lineHeight = 36.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = (-.32).sp)
+            Text("SKR", Modifier.padding(bottom = 4.dp), style = TitleSm, color = Muted)
+        }
+        Text(tr(Message.MomentsPostedMissed), style = BodyMd, color = Muted)
+        HorizontalDivider(Modifier.padding(top = 12.dp), color = Line)
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(tr(Message.YourShare), style = TitleSm)
+            Text("58 SKR", style = TitleSm, color = Success)
+        }
+    }
+}
+
+@Composable
+private fun RuleRows(vararg rows: Triple<ImageVector, String, String>) {
+    Column(Modifier.fillMaxWidth().clip(Radius2xl).background(Panel).padding(horizontal = 16.dp)) {
+        rows.forEachIndexed { index, row ->
+            if (index > 0) HorizontalDivider(color = Line)
+            Row(Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(Modifier.size(40.dp).clip(RadiusMd).background(SurfaceHigh),
+                    contentAlignment = Alignment.Center) {
+                    Icon(row.first, contentDescription = null, tint = Accent, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text(row.second, style = TitleMd)
+                    Text(row.third, style = BodyMd, color = Muted)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PermissionCards(vararg rows: Triple<ImageVector, String, String>) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        rows.forEach { row ->
+            Row(Modifier.fillMaxWidth().clip(RadiusLg).background(Panel).padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.size(48.dp).clip(RadiusMd).background(SurfaceHigh),
+                    contentAlignment = Alignment.Center) {
+                    Icon(row.first, contentDescription = null, tint = Accent, modifier = Modifier.size(24.dp))
+                }
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(row.second, style = TitleMd)
+                    Text(row.third, style = BodyMd, color = Muted)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AcceptCheckbox(checked: Boolean, onToggle: (Boolean) -> Unit) {
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        .toggleable(checked, role = Role.Checkbox, onValueChange = onToggle)
+        .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.size(24.dp).clip(RoundedCornerShape(4.dp))
+            .background(if (checked) Accent else Color.Transparent)
+            .border(2.dp, if (checked) Accent else Muted, RoundedCornerShape(4.dp)),
+            contentAlignment = Alignment.Center) {
+            if (checked) Icon(Icons.Outlined.Check, contentDescription = null, tint = OnBrand,
+                modifier = Modifier.size(16.dp))
+        }
+        Text(tr(Message.IHaveReadAndAcceptTheTerms),
+            Modifier.weight(1f), style = BodyMd)
+    }
+}
+
+@Composable
+private fun BadgeTile(icon: ImageVector, label: String) {
+    Box(Modifier.size(96.dp).clip(RadiusXl).background(PanelRaised)
+        .semantics { contentDescription = label }, contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = null, tint = Accent, modifier = Modifier.size(40.dp))
+    }
+}
+
+@Composable
+private fun StakeStep(
+    step: OnboardingStep, state: ChainState, busy: Boolean, error: String?,
+    onBack: () -> Unit, onStake: (Long) -> Unit, onContinue: () -> Unit,
+    onFaucet: () -> Unit, onDisconnect: () -> Unit,
+) {
+    val min = state.minStake
+    val balance = state.tokenBalance
+    var amount by rememberSaveable(min) { mutableLongStateOf(min) }
+    val enough = balance >= min
+    val staked = state.active
+    val covered = staked && state.balance >= min
+    var adding by rememberSaveable { mutableStateOf(false) }
+    val canAdd = amount in min..balance
+    val presets = listOf(min, min * 2, min * 5).filter { it <= balance || it == min }
+    val picking = !covered || adding
+
+    StepScaffold(
+        step = step, onBack = { if (!busy) onBack() },
+        title = tr(Message.PutYourStakeInPlay),
+        body = when {
+            covered -> tr(Message.YourStakeMeetsTheSkrMinimum, skr(min))
+            staked -> tr(Message.YourStakeFellBelowSkrTopIt, skr(min))
+            else -> tr(Message.OnboardingStakeExplanation, skr(min), decayPercent(state))
+        },
+        error = error,
+        titleFirst = true,
+        illustration = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (staked) Text(tr(Message.AlreadyStakedSkr, skr(state.balance)),
+                    style = TitleMd, color = Success)
+                if (picking) AmountPicker(
+                    value = amount, min = min, step = min, max = balance, presets = presets,
+                    supporting = if (enough) tr(Message.ADayWithoutAMomentCosts2, decayPercent(state))
+                        else tr(Message.YouNeedSkrYourBalanceIsSkr, skr(min), skr(balance)),
+                    error = !enough,
+                    onChange = { amount = it },
+                ) else StakePreview(state)
+            }
+        },
+        actions = {
+            if (covered) {
+                PrimaryButton(if (busy) tr(Message.Signing) else tr(Message.Continue),
+                    enabled = !busy, onClick = onContinue)
+                if (!adding) TextButton(
+                    onClick = { adding = true }, enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr(Message.AddToMyStake), color = Accent) }
+                else TextButton(
+                    onClick = { onStake(amount) }, enabled = !busy && canAdd,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(tr(Message.AddSkrToMyStake, skr(amount)), color = if (canAdd) Accent else Muted) }
+            } else {
+                PrimaryButton(
+                    if (busy) tr(Message.Signing) else tr(Message.StakeSkr, skr(amount)),
+                    enabled = enough && canAdd, loading = busy,
+                ) { onStake(amount) }
+                if (!enough) {
+                    if (!state.faucetClaimed) TextButton(
+                        onClick = onFaucet, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(tr(Message.GetTestSkr), color = Accent) }
+                    TextButton(
+                        onClick = onDisconnect, enabled = !busy,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text(tr(Message.ChangeWallet), color = Muted) }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            SheetNote(tr(Message.NetworkFeesLessThanSol))
+        },
+    )
+}
+
+@Composable
+private fun FirstMoment(state: ChainState, now: Long, onFinish: (openCapture: Boolean) -> Unit) {
+    val left = secondsUntilNextMoment(now)
+    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+        Spacer(Modifier.height(40.dp))
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            Shutter(
+                fraction = left / DAY_SECONDS.toFloat(),
+                timeLabel = countdown(left),
+                hint = tr(Message.YouHaveHLeftToCaptureToday, left / 3600),
+                onCapture = { onFinish(true) },
+            )
+        }
+        Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(tr(Message.YourStakeIsInPlay), style = DisplayMd)
+            Text(tr(Message.CaptureYourFirstMomentToSeeThe), style = BodyLg, color = Muted)
+        }
+        Box(Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
+            Snackbar(tr(Message.SkrStaked, skr(state.balance)))
+        }
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+            PrimaryButton(tr(Message.CaptureMyMoment)) { onFinish(true) }
+            TextButton(onClick = { onFinish(false) }, modifier = Modifier.fillMaxWidth()) {
+                Text(tr(Message.SeeTheFeedFirst), color = Muted)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegalText(document: String, onClose: () -> Unit) {
+    val documentLabel = if (document == "conditions") tr(Message.TermsOfUse) else tr(Message.PrivacyPolicy)
+    Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 8.dp, end = 16.dp, top = 24.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = tr(Message.Back), tint = White)
+            }
+            Text(documentLabel.replaceFirstChar { it.uppercase() }, style = HeadlineSm)
+        }
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Text(tr(Message.TheFullTextHasnTBeenPublished, documentLabel),
+                style = BodyLg, color = Muted)
+            Text(tr(Message.LegalSummary),
+                style = BodyMd, color = Muted)
+        }
+    }
+}

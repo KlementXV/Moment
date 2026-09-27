@@ -1,4 +1,3 @@
-# Allowlist: never send wallets, .env, .git, databases or Android build outputs.
 **
 !keyserver/
 !keyserver/Cargo.toml

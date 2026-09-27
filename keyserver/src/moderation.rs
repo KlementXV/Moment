@@ -1,4 +1,3 @@
-//! Server-side review is mandatory and has no client-side override.
 use crate::{
     error::{Error, Result},
     protocol::{hash, MAX_PHOTO},
@@ -89,7 +88,6 @@ fn infer(session: &mut Session, rgb: &[u8]) -> anyhow::Result<f32> {
 }
 impl Reviewer for OnnxReviewer {
     fn review(&self, rear: &[u8], front: &[u8]) -> Result<()> {
-        // Check both containers before decoding either; never infer malformed photos.
         validate_jpeg(rear)?;
         validate_jpeg(front)?;
         let mut session = self.session.lock().map_err(|_| Error::unavailable())?;
@@ -115,8 +113,6 @@ fn invalid_photo() -> Error {
     Error::bad("Photo JPEG invalide, trop grande ou contenant des métadonnées. Reprenez les photos dans l’application.")
 }
 
-/// Parse every marker, including markers between progressive scans and after entropy data.
-/// Only a bare JFIF APP0 is permitted; EXIF, ICC, comments and trailing bytes are refused.
 fn validate_jpeg(bytes: &[u8]) -> Result<()> {
     if bytes.len() > MAX_PHOTO || !bytes.starts_with(&[0xff, 0xd8]) {
         return Err(invalid_photo());
@@ -202,7 +198,7 @@ fn validate_jpeg(bytes: &[u8]) -> Result<()> {
                 scan = true;
                 entropy = true;
             }
-            0xc4 | 0xdb | 0xdd => {} // Huffman, quantization and restart tables.
+            0xc4 | 0xdb | 0xdd => {}
             _ => return Err(invalid_photo()),
         }
     }
@@ -314,7 +310,6 @@ mod tests {
         let rgb = include_bytes!("../../app/app/src/androidTest/assets/moderation/input.rgb");
         let score = infer(&mut engine.session.lock().unwrap(), rgb).unwrap();
         assert!((score - 0.058171317).abs() < 1e-5);
-        // Exercise the actual JPEG -> resize -> two inferences -> policy path too.
         let rear = include_bytes!("../../app/app/src/androidTest/assets/moderation/rear.jpg");
         let front = include_bytes!("../../app/app/src/androidTest/assets/moderation/front.jpg");
         engine.review(rear, front).unwrap();
