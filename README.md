@@ -120,6 +120,24 @@ Le script détecte le Seeker, compile l’APK debug, l’installe en conservant 
 - **21 tests Android** : rotation et miroir, recadrage/résolution, GPS/identité/date, segments XMP/IPTC/commentaires, chiffrement Android Keystore, onboarding, feed de démo et funnel quotidien (barre conditionnelle, accès au profil et retour, CTA et confidentialité de l’aperçu). Suite validée sur émulateur Android 16 ; exécution sur Seeker interrompue par le verrouillage puis la déconnexion USB.
 - Android Lint sans erreur.
 
+## Intégration continue
+
+`.github/workflows/ci.yml`, à chaque push et pull request :
+
+- **Programme** : `cargo build-sbf --arch v0` (Agave 4.1.2), clippy, tests litesvm.
+- **Keyserver** : clippy et tests, contre un PostgreSQL 17 de service.
+- **Chart Helm** : `tests/render.py`.
+- **App Android** : tests unitaires des deux variantes, lint, puis les APK
+  `devnet` et `mainnet` (debug) en artefacts, gardés 14 jours.
+- **Image du keyserver** : sur push de la branche principale ou d'un tag `v*`,
+  et seulement si le keyserver et le chart passent, publiée sur
+  `ghcr.io/<propriétaire>/moment-keyserver` (tags `sha-…`, branche, version).
+  Dans le chart : `image.repository=ghcr.io/<propriétaire>/moment-keyserver`.
+
+Réglages du dépôt GitHub, tous facultatifs : variables `CLOCKIN_DEVNET_BACKEND_URL`
+et `CLOCKIN_MAINNET_BACKEND_URL`, secret `CLOCKIN_MAINNET_RPC_URL` (RPC payant
+avec jeton). Sans eux, les APK gardent les valeurs par défaut de chaque réseau.
+
 ## Programme on-chain (devnet)
 
 Programme Anchor `clockin` : `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6`.
