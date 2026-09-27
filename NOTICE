@@ -1,0 +1,8 @@
+Moment
+Copyright 2026 Klément
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product bundles the Marqo/nsfw-image-detection-384 moderation model
+(app/app/src/main/assets/moderation/), Apache-2.0, with its own LICENSE.txt
+and NOTICE.txt.

@@ -266,6 +266,6 @@ n’est pas validée. [Implémentation, mesures et outil de calibration](docs/lo
 
 ## Licence
 
-Code sous licence MIT (`LICENSE`). Le modèle de modération embarqué
-(`app/app/src/main/assets/moderation/`, Marqo/nsfw-image-detection-384) reste
-sous sa propre licence Apache-2.0, avec son `LICENSE.txt` et son `NOTICE.txt`.
+Apache-2.0 (`LICENSE`, `NOTICE`), pour tout le dépôt. Le modèle de modération
+embarqué (`app/app/src/main/assets/moderation/`, Marqo/nsfw-image-detection-384)
+est lui aussi sous Apache-2.0 et garde son propre `LICENSE.txt` et `NOTICE.txt`.
