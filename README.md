@@ -76,14 +76,31 @@ L’émulateur utilise ses caméras virtuelles ; rendu et latence restent à val
 
 Ouvrir `app/` dans Android Studio, SDK Android 37 et JDK compatible avec Gradle 9.7.1 (JBR Android Studio utilisé ici).
 
+Deux builds, une par réseau, figées à la compilation :
+
+| Variante | Nom affiché | Identifiant Android | Réseau, mint |
+|---|---|---|---|
+| `devnet` | Moment dev | `com.clockin.hackathon.dev` | devnet, mint de test (9 décimales) |
+| `mainnet` | Moment | `com.clockin.hackathon` | mainnet, vrai SKR (6 décimales) |
+
+Les deux s'installent côte à côte. Chaque valeur (`rpcUrl`, `programId`,
+`skrMint`, `skrDecimals`, `backendUrl`) se surcharge par
+`clockin.<réseau>.<nom>` dans `local.properties`, ou par la variable
+d'environnement `CLOCKIN_<RÉSEAU>_<NOM>` en CI (par exemple
+`CLOCKIN_MAINNET_RPC_URL`). Les anciennes clés `clockin.<nom>` restent lues pour
+devnet. Une app installée avant ces variantes (identifiant
+`com.clockin.hackathon`, devnet) est à désinstaller : la build mainnet la
+remplacerait.
+
 ```sh
 cd app
-./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:assembleDevnetDebug :app:testDevnetDebugUnitTest :app:testMainnetDebugUnitTest :app:lintDevnetDebug
 # Avec un appareil / émulateur connecté :
-./gradlew :app:connectedDebugAndroidTest
+./gradlew :app:connectedDevnetDebugAndroidTest
 ```
 
-APK : `app/app/build/outputs/apk/debug/app-debug.apk`. Identifiant Android conservé : `com.clockin.hackathon`, pour mettre à jour les versions précédentes.
+APK : `app/app/build/outputs/apk/devnet/debug/app-devnet-debug.apk` et
+`app/app/build/outputs/apk/mainnet/debug/app-mainnet-debug.apk`.
 
 ### Installer sur le Seeker
 

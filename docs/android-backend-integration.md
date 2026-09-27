@@ -62,7 +62,7 @@ La configuration release n’autorise pas ce transport en clair.
 Depuis `app/`, avec Java 17 ou le JBR d’Android Studio :
 
 ```sh
-./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease :app:lintDebug --offline
+./gradlew :app:testDevnetDebugUnitTest :app:testMainnetDebugUnitTest :app:assembleDevnetDebug :app:assembleMainnetRelease :app:lintDevnetDebug --offline
 ```
 
 `BackendTest` couvre le HTTP local (session, dépôt, confirmation, feed et blob),

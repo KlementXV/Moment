@@ -1,6 +1,7 @@
 package com.clockin.hackathon.i18n
 
 import com.clockin.hackathon.SKR
+import com.clockin.hackathon.SkrUnit
 import com.clockin.hackathon.ui.*
 import com.clockin.hackathon.wallet.WalletFailure
 import java.time.Instant
@@ -11,6 +12,12 @@ import org.junit.Test
 
 class LocalizationTest {
     @After fun resetLanguage() { AppLanguage.select(null) }
+
+    // Les montants de ce test sont en unités du mint de test (9 décimales),
+    // quelle que soit la build (6 par défaut sur mainnet).
+    private val buildDecimals = SkrUnit.decimals
+    @org.junit.Before fun testMintUnit() { SkrUnit.decimals = 9 }
+    @After fun restoreUnit() { SkrUnit.decimals = buildDecimals }
 
     @Test fun every_translation_preserves_all_placeholders() {
         val placeholder = Regex("\\{\\d+\\}")

@@ -86,10 +86,10 @@ Pour les tests sur appareil, compiler les APK puis les installer avec `adb insta
 
 ```sh
 cd app
-./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:compileReleaseKotlin
-adb install -r -t app/build/outputs/apk/debug/app-debug.apk
-adb install -r -t app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-adb shell am instrument -w -e class com.clockin.hackathon.moderation.LocalModeratorTest,com.clockin.hackathon.ui.DeveloperModeTest,com.clockin.hackathon.ui.ModerationReviewTest com.clockin.hackathon.test/androidx.test.runner.AndroidJUnitRunner
+./gradlew :app:testDevnetDebugUnitTest :app:assembleDevnetDebug :app:assembleDevnetDebugAndroidTest :app:compileMainnetReleaseKotlin
+adb install -r -t app/build/outputs/apk/devnet/debug/app-devnet-debug.apk
+adb install -r -t app/build/outputs/apk/androidTest/devnet/debug/app-devnet-debug-androidTest.apk
+adb shell am instrument -w -e class com.clockin.hackathon.moderation.LocalModeratorTest,com.clockin.hackathon.ui.DeveloperModeTest,com.clockin.hackathon.ui.ModerationReviewTest com.clockin.hackathon.dev.test/androidx.test.runner.AndroidJUnitRunner
 adb exec-out run-as com.clockin.hackathon cat files/moderation-benchmark.json
 ```
 

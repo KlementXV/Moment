@@ -1,6 +1,9 @@
 package com.clockin.hackathon.ui
 
 import com.clockin.hackathon.SKR
+import com.clockin.hackathon.SkrUnit
+import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -12,6 +15,12 @@ import org.junit.Test
  * une virgule française comme un point, et neuf décimales — celles du mint.
  */
 class AmountInputTest {
+    // Unité par défaut fixée au mint de test (9 décimales), quelle que soit la
+    // build ; les cas à 6 décimales la passent explicitement.
+    private val buildDecimals = SkrUnit.decimals
+    @Before fun testMintUnit() { SkrUnit.decimals = 9 }
+    @After fun restoreUnit() { SkrUnit.decimals = buildDecimals }
+
     @Test fun `a whole number is read in base units`() {
         assertEquals(500 * SKR, parseSkrAmount("500"))
     }

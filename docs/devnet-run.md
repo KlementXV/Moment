@@ -73,9 +73,9 @@ solana account KtzTHLLs5hoFn47WbUuttmbgj3LykhwfbtDgUfmmkLK --url devnet
 pas commité.
 
 ```sh
-cd app && ./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.clockin.hackathon/.MainActivity
+cd app && ./gradlew :app:assembleDevnetDebug
+adb install -r app/build/outputs/apk/devnet/debug/app-devnet-debug.apk
+adb shell am start -n com.clockin.hackathon.dev/com.clockin.hackathon.MainActivity
 ```
 
 **L'appareil doit être déverrouillé** : `adb` peut lancer l'activité derrière
