@@ -1,7 +1,6 @@
 mod common;
 
 use common::{Ctx, SKR};
-use solana_signer::Signer;
 
 const HOUR: i64 = 3_600;
 
