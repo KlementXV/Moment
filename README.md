@@ -263,3 +263,9 @@ sur le Seeker testé.
 Les seuils de `assets/moderation/policy.json` sont expérimentaux et ne sont pas
 calibrés. La vraie publication release reste désactivée tant que cette calibration
 n’est pas validée. [Implémentation, mesures et outil de calibration](docs/local-nsfw-integration.md).
+
+## Licence
+
+Code sous licence MIT (`LICENSE`). Le modèle de modération embarqué
+(`app/app/src/main/assets/moderation/`, Marqo/nsfw-image-detection-384) reste
+sous sa propre licence Apache-2.0, avec son `LICENSE.txt` et son `NOTICE.txt`.
