@@ -24,8 +24,8 @@ keys/
 *.keystore
 
 # Local moderation export tooling
-scripts/nsfw/__pycache__/
-scripts/nsfw/.venv/
+scripts/moderation/__pycache__/
+scripts/moderation/.venv/
 
 # Rust keyserver: builds, local credentials and durable state
 keyserver/target/
