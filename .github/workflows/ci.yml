@@ -116,7 +116,7 @@ jobs:
       MOMENT_DEVNET_PROGRAM_ID: ${{ vars.MOMENT_DEVNET_PROGRAM_ID }}
     steps:
       - uses: actions/checkout@v4
-      - name: Validate release backend URL
+      - name: Validate release configuration
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
           python3 - <<'PY'
@@ -143,7 +143,37 @@ jobs:
               valid = False
           if not valid:
               raise SystemExit("::error::MOMENT_DEVNET_BACKEND_URL must be an HTTPS origin without credentials, path, query, or fragment")
+
+          program_id = os.environ.get("MOMENT_DEVNET_PROGRAM_ID", "")
+          if not program_id:
+              raise SystemExit("::error::Set the MOMENT_DEVNET_PROGRAM_ID GitHub Actions variable before tagging a release")
+          alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+          number = 0
+          for character in program_id:
+              if character not in alphabet:
+                  raise SystemExit("::error::MOMENT_DEVNET_PROGRAM_ID must be a Solana base58 public key")
+              number = number * 58 + alphabet.index(character)
+          decoded_length = (number.bit_length() + 7) // 8 + len(program_id) - len(program_id.lstrip("1"))
+          if decoded_length != 32:
+              raise SystemExit("::error::MOMENT_DEVNET_PROGRAM_ID must decode to 32 bytes")
           PY
+      - name: Restore release signing key
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Missing GitHub Actions secret: $name" >&2
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/moment-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/moment-release.jks" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -167,23 +197,6 @@ jobs:
             app/app/build/outputs/apk/devnet/debug/app-devnet-debug.apk
           retention-days: 14
           if-no-files-found: error
-      - name: Restore release signing key
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!name}" ]; then
-              echo "Missing GitHub Actions secret: $name" >&2
-              exit 1
-            fi
-          done
-          umask 077
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/moment-release.jks"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/moment-release.jks" >> "$GITHUB_ENV"
       - name: Signed devnet release APK
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:

@@ -42,13 +42,13 @@ In the repository's **Settings → Secrets and variables → Actions**, configur
 | Type | Name | Purpose |
 | --- | --- | --- |
 | Variable | `MOMENT_DEVNET_BACKEND_URL` | HTTPS origin of the deployed devnet keyserver; required for tagged releases |
-| Variable | `MOMENT_DEVNET_PROGRAM_ID` | Optional devnet program address; the app has a committed devnet default |
+| Variable | `MOMENT_DEVNET_PROGRAM_ID` | Devnet program address; required for tagged releases |
 | Secret | `ANDROID_KEYSTORE_BASE64` | Base64-encoded release keystore; required for tagged releases |
 | Secret | `ANDROID_KEYSTORE_PASSWORD` | Keystore password; required for tagged releases |
 | Secret | `ANDROID_KEY_ALIAS` | Release key alias; required for tagged releases |
 | Secret | `ANDROID_KEY_PASSWORD` | Release key password; required for tagged releases |
 
-Debug devnet APKs can build without a backend URL. A tagged release fails before the Android build if `MOMENT_DEVNET_BACKEND_URL` is absent or is not an HTTPS origin (for example, `https://moment.example.com`, with no path or query). Real publication and feed access also require that the server be deployed and reachable. If `MOMENT_DEVNET_PROGRAM_ID` is unset, Gradle uses the committed devnet default. Program IDs are public addresses, so GitHub Variables are appropriate. No mainnet settings are currently needed in GitHub Actions.
+Debug devnet APKs can build without these variables. A tagged release fails before the Android build if `MOMENT_DEVNET_BACKEND_URL` is absent or is not an HTTPS origin (for example, `https://moment.example.com`, with no path or query), or if `MOMENT_DEVNET_PROGRAM_ID` is missing or is not a 32-byte Solana public key. Set the program ID to `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6` if that is still your deployed devnet program. Real publication and feed access also require that the server and program be deployed and reachable. Program IDs are public addresses, so GitHub Variables are appropriate. No mainnet settings are currently needed in GitHub Actions.
 
 RPC and backend URLs are embedded in the APK. Storing an RPC URL in a GitHub Secret does not keep a provider API key private once the APK is distributed.
 
