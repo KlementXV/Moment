@@ -141,101 +141,14 @@ The variants install side by side. Mainnet settings use the `moment.mainnet.*` p
 
 For an interface preview, the profile also provides an optional demo feed with illustrated sample Moments. Those samples do not represent real publications or on-chain activity.
 
-## Backend and program setup
+## Development documentation
 
-### Keyserver
+- [Backend and Anchor program setup](docs/backend-and-program.md)
+- [Tests, continuous integration, and GitHub Actions variables](docs/testing-and-ci.md)
+- [Keyserver configuration and API](keyserver/README.md)
+- [Kubernetes deployment](keyserver/helm/moment-keyserver/README.md)
 
-The backend uses Rust, Axum, PostgreSQL 17, ONNX Runtime CPU 1.23.2, and either local blob storage or a private Cloudflare R2 bucket.
-
-```sh
-cd keyserver
-cargo build --locked --release
-mkdir -p data secrets
-chmod 700 data secrets
-cp .env.example .env
-chmod 600 .env
-```
-
-Configure `.env` with the database connection, RPC endpoint, publication authority keypair, encryption key, storage settings, and native ONNX Runtime library path. The authority must match the program's `Config.publication_authority`. The server does not automatically load `.env`; source it before starting:
-
-```sh
-set -a
-. ./.env
-set +a
-./target/release/moment-keyserver
-```
-
-For local devnet development, `BLOB_STORE=local` enables local encrypted storage. The experimental moderation policy requires the explicit devnet-only setting `ALLOW_UNCALIBRATED_MODERATION=true`; the backend rejects that setting on mainnet.
-
-Detailed configuration and API documentation are in the [keyserver README](keyserver/README.md). Kubernetes deployment is documented in the [Helm chart README](keyserver/helm/moment-keyserver/README.md).
-
-### Anchor program
-
-The program uses four account types:
-
-| Account | Purpose |
-| --- | --- |
-| `Config` | Token mint, publication authority, and economic parameters |
-| `Profile` | Wallet participation, stake, streak, withdrawal state, and pending pool claims |
-| `DayPool` | Daily stake totals and penalties available for distribution |
-| `CheckIn` | Wallet/day publication commitment and encrypted packet reference |
-
-Build with the SBPF v0 target used by the repository's LiteSVM tests:
-
-```sh
-cd program
-anchor build --arch v0
-```
-
-Initial configuration must be signed by the program’s current upgrade authority, before making the program immutable. The bootstrap instruction includes the program-data account to enforce this on-chain.
-
-The [devnet deployment script](program/scripts/deploy-devnet.sh) builds and deploys the program, creates a test mint, initializes the configuration, seeds the pool, and transfers test-mint authority to the program. It requires the Solana, SPL Token, and Anchor CLIs, a funded devnet admin wallet, and the bootstrap dependencies:
-
-```sh
-cd program/scripts
-npm ci
-cd ../..
-PUBLICATION_AUTHORITY=YOUR_PUBLICATION_AUTHORITY_PUBLIC_KEY ./program/scripts/deploy-devnet.sh
-```
-
-Use the resulting program and mint addresses in both the app and keyserver configuration.
-
-## Tests and continuous integration
-
-The repository contains tests for wallet signatures, transaction encoding, account layouts, pool accounting, encrypted storage, publication retries, backend authorization, photo preprocessing, and Android UI flows.
-
-Android unit tests and lint:
-
-```sh
-cd app
-./gradlew :app:testDevnetDebugUnitTest :app:testMainnetDebugUnitTest :app:lintDevnetDebug
-```
-
-Android instrumented tests, with a device or emulator connected:
-
-```sh
-cd app
-./gradlew :app:connectedDevnetDebugAndroidTest
-```
-
-Program tests:
-
-```sh
-cd program
-anchor build --arch v0
-cargo test -p moment
-```
-
-Backend tests:
-
-```sh
-cd keyserver
-cargo test --locked
-```
-
-Backend database integration tests use `TEST_DATABASE_URL` for a dedicated PostgreSQL test database. Native moderation tests also require the ONNX Runtime library configured through `ORT_DYLIB_PATH`.
-
-The [CI workflow](.github/workflows/ci.yml) builds the program, runs Rust checks and tests, validates the Helm chart, and builds both Android variants. Android APKs are uploaded as workflow artifacts. After the backend and Helm jobs pass, pushes can also publish the keyserver image to GitHub Container Registry.
+The CI builds and tests the program and backend, validates the Helm chart, and builds the devnet Android variant. Branch builds provide a debug APK as a workflow artifact; version tags publish a signed devnet APK in GitHub Releases. The mainnet variant remains available for local builds but is excluded from CI until its deployment is ready. Pushes can also publish the keyserver image to GitHub Container Registry.
 
 ## Repository layout
 

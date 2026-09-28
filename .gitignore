@@ -20,6 +20,8 @@ program/node_modules/
 
 # Local development keys: never commit
 keys/
+*.jks
+*.keystore
 
 # Local moderation export tooling
 scripts/nsfw/__pycache__/

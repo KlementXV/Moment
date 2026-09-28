@@ -11,6 +11,17 @@ val localProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Stable local version; tagged CI builds override it with -PversionTag=vX.Y.Z.
+val versionTag = providers.gradleProperty("versionTag").orNull ?: "v0.3.0"
+val versionMatch = Regex("^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$").matchEntire(versionTag)
+    ?: error("versionTag must be a stable tag such as v0.3.0 (pre-releases need a distinct versionCode scheme)")
+val (versionMajor, versionMinor, versionPatch) = versionMatch.destructured.toList().map(String::toInt)
+require(versionMinor <= 999 && versionPatch <= 999) { "versionTag minor and patch must be at most 999" }
+val androidVersionCode = versionMajor.toLong() * 1_000_000 + versionMinor * 1_000 + versionPatch
+require(androidVersionCode in 1..2_100_000_000) { "versionTag produces an invalid Android versionCode" }
+
+val releaseKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")?.takeIf(String::isNotBlank)
+
 fun setting(network: String, name: String, fallback: String): String {
     val env = "MOMENT_${network}_${name.replace(Regex("([A-Z])"), "_$1")}".uppercase()
     return localProperties.getProperty("moment.$network.$name")
@@ -44,8 +55,8 @@ android {
         applicationId = "com.klementxv.moment"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.3.0"
+        versionCode = androidVersionCode.toInt()
+        versionName = versionTag.removePrefix("v")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         buildConfigField("String", "IDENTITY_RPC_URL",
@@ -74,8 +85,25 @@ android {
         }
     }
 
+    signingConfigs {
+        create("ciRelease") {
+            if (releaseKeystorePath != null) {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")?.takeIf(String::isNotBlank)
+                    ?: error("ANDROID_KEYSTORE_PASSWORD is required for signed release builds")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")?.takeIf(String::isNotBlank)
+                    ?: error("ANDROID_KEY_ALIAS is required for signed release builds")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")?.takeIf(String::isNotBlank)
+                    ?: error("ANDROID_KEY_PASSWORD is required for signed release builds")
+            }
+        }
+    }
+
     buildTypes {
-        release { isMinifyEnabled = false }
+        release {
+            isMinifyEnabled = false
+            if (releaseKeystorePath != null) signingConfig = signingConfigs.getByName("ciRelease")
+        }
     }
 
     compileOptions {
