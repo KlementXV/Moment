@@ -41,14 +41,14 @@ In the repository's **Settings → Secrets and variables → Actions**, configur
 
 | Type | Name | Purpose |
 | --- | --- | --- |
-| Variable | `MOMENT_DEVNET_BACKEND_URL` | HTTPS URL of the deployed devnet keyserver |
+| Variable | `MOMENT_DEVNET_BACKEND_URL` | HTTPS origin of the deployed devnet keyserver; required for tagged releases |
 | Variable | `MOMENT_DEVNET_PROGRAM_ID` | Optional devnet program address; the app has a committed devnet default |
 | Secret | `ANDROID_KEYSTORE_BASE64` | Base64-encoded release keystore; required for tagged releases |
 | Secret | `ANDROID_KEYSTORE_PASSWORD` | Keystore password; required for tagged releases |
 | Secret | `ANDROID_KEY_ALIAS` | Release key alias; required for tagged releases |
 | Secret | `ANDROID_KEY_PASSWORD` | Release key password; required for tagged releases |
 
-The devnet APK can build without a backend URL, but real publication and feed access require a configured backend. If `MOMENT_DEVNET_PROGRAM_ID` is unset, Gradle uses the committed devnet default. Program IDs are public addresses, so GitHub Variables are appropriate. No mainnet settings are currently needed in GitHub Actions.
+Debug devnet APKs can build without a backend URL. A tagged release fails before the Android build if `MOMENT_DEVNET_BACKEND_URL` is absent or is not an HTTPS origin (for example, `https://moment.example.com`, with no path or query). Real publication and feed access also require that the server be deployed and reachable. If `MOMENT_DEVNET_PROGRAM_ID` is unset, Gradle uses the committed devnet default. Program IDs are public addresses, so GitHub Variables are appropriate. No mainnet settings are currently needed in GitHub Actions.
 
 RPC and backend URLs are embedded in the APK. Storing an RPC URL in a GitHub Secret does not keep a provider API key private once the APK is distributed.
 
@@ -64,8 +64,8 @@ For each new version:
 2. Create and push a new, higher version tag from that commit:
 
    ```sh
-   git tag v0.3.0
-   git push origin v0.3.0
+   git tag v0.3.1
+   git push origin v0.3.1
    ```
 
 3. Wait for CI; the release is published automatically with generated notes and the devnet APK.

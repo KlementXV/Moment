@@ -116,6 +116,34 @@ jobs:
       MOMENT_DEVNET_PROGRAM_ID: ${{ vars.MOMENT_DEVNET_PROGRAM_ID }}
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release backend URL
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python3 - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          value = os.environ.get("MOMENT_DEVNET_BACKEND_URL", "")
+          if not value:
+              raise SystemExit("::error::Set the MOMENT_DEVNET_BACKEND_URL GitHub Actions variable before tagging a release")
+          try:
+              url = urlsplit(value)
+              valid = (
+                  value == value.strip()
+                  and url.scheme == "https"
+                  and bool(url.hostname)
+                  and url.username is None
+                  and url.password is None
+                  and url.port != 0
+                  and url.path in ("", "/")
+                  and not url.query
+                  and not url.fragment
+              )
+          except ValueError:
+              valid = False
+          if not valid:
+              raise SystemExit("::error::MOMENT_DEVNET_BACKEND_URL must be an HTTPS origin without credentials, path, query, or fragment")
+          PY
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
