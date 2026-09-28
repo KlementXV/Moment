@@ -150,6 +150,43 @@ The IP quota is 120 requests per minute per pod. Behind a proxy, configure only 
 
 There is no automatic post/blob retention cleanup. Define coordinated database/object retention before long-running operation. Back up PostgreSQL, private R2 objects, and the encryption master key independently and validate recovery together.
 
+## Docker Compose on a VPS (devnet)
+
+[`compose.prod.yaml`](compose.prod.yaml) runs the keyserver and a persistent PostgreSQL 17 instance. It does not start Traefik or expose PostgreSQL. The API is published only on the VPS loopback address, `127.0.0.1:8080` by default. PostgreSQL is on a private Docker network; an initialization job creates a private CA and server certificate so the keyserver can use `PGSSLMODE=verify-full`. The backend image is built locally from the repository, so GHCR access is not required.
+
+From `keyserver/`:
+
+```sh
+cp compose.prod.env.example .env.prod
+chmod 600 .env.prod
+mkdir -p secrets
+chmod 750 secrets
+```
+
+Edit `.env.prod`: set `AUTH_ORIGIN` to the exact public HTTPS origin used by the Android app, confirm `PROGRAM_ID` and `RPC_URL`, set a strong `PGPASSWORD` (for example, from `openssl rand -hex 32`) and a stable `KEY_ENCRYPTION_KEY` (`openssl rand -base64 32`), and fill in private R2 bucket credentials. The R2 bucket must have public access disabled. Keep `NETWORK=devnet` and `ALLOW_UNCALIBRATED_MODERATION=true` only for the current experimental devnet policy. The keyserver will refuse to start if its authority does not match the program configuration.
+
+Put the dedicated Solana publication keypair in `secrets/publication-authority.json`. The container runs as UID/GID `10001`, so that user must be able to traverse `secrets/` and read the file; on a Linux VPS, for example:
+
+```sh
+sudo chown 10001:10001 secrets secrets/publication-authority.json
+chmod 750 secrets
+chmod 600 secrets/publication-authority.json
+```
+
+For scheduled pool settlement, also place a **different**, SOL-funded keypair in `secrets/crank.json`, give it the same ownership and permissions, and uncomment `CRANK_KEYPAIR` in `.env.prod`. Without it, the HTTP service starts but the built-in settlement worker is disabled.
+
+Start and check the stack:
+
+```sh
+docker compose --env-file .env.prod -f compose.prod.yaml config --quiet
+docker compose --env-file .env.prod -f compose.prod.yaml up -d --build --wait
+curl -fsS http://127.0.0.1:8080/readyz
+```
+
+The private `postgres_data` volume holds the database. Back it up together with the R2 objects, publication keypair, and encryption master key, then test restoring them together. The PostgreSQL TLS CA is stored in Docker volumes and lasts ten years; plan certificate rotation before expiry. This Compose deployment has one database instance, so it does not provide the replication and automated backups of the Helm deployment.
+
+If Traefik runs directly on the VPS, it can proxy to `127.0.0.1:8080`. If Traefik runs in another Docker container, host loopback is not its loopback: attach **only the keyserver** to Traefik's existing external Docker network with a local Compose override, and keep PostgreSQL on its private network. Do not change the published port to `0.0.0.0`. Configure the proxy to preserve the public HTTPS origin and forward client IPs correctly; set `TRUSTED_PROXY_CIDRS` only to the actual proxy subnet. Set GitHub's `MOMENT_DEVNET_BACKEND_URL` to the same public origin as `AUTH_ORIGIN` before tagging an APK release.
+
 ## Tests
 
 Run from `keyserver/`. Database tests require a disposable PostgreSQL database; each test uses an isolated schema.

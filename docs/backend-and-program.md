@@ -26,7 +26,7 @@ set +a
 
 For local devnet development, `BLOB_STORE=local` enables local encrypted storage. The experimental moderation policy requires the explicit devnet-only setting `ALLOW_UNCALIBRATED_MODERATION=true`; the backend rejects that setting on mainnet.
 
-Detailed configuration and API documentation are in the [keyserver README](../keyserver/README.md). Kubernetes deployment is documented in the [Helm chart README](../keyserver/helm/moment-keyserver/README.md).
+Detailed configuration, the Docker Compose VPS setup, and API documentation are in the [keyserver README](../keyserver/README.md). Kubernetes deployment is documented in the [Helm chart README](../keyserver/helm/moment-keyserver/README.md).
 
 ### Anchor program
 

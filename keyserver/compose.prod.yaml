@@ -1,0 +1,86 @@
+name: moment-keyserver
+
+services:
+  postgres-tls-init:
+    image: alpine:3.20
+    restart: "no"
+    command: ["sh", "/usr/local/bin/postgres-tls-init.sh"]
+    volumes:
+      - ./compose/postgres-tls-init.sh:/usr/local/bin/postgres-tls-init.sh:ro
+      - postgres_tls:/tls
+      - postgres_ca:/ca
+    networks: [egress]
+
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    depends_on:
+      postgres-tls-init:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_DB: ${PGDATABASE:-moment}
+      POSTGRES_USER: ${PGUSER:-moment}
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env.prod}
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/run/postgres-tls/server.crt
+      - -c
+      - ssl_key_file=/var/run/postgres-tls/server.key
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - postgres_tls:/var/run/postgres-tls:ro
+    networks: [db]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  keyserver:
+    build:
+      context: ..
+      dockerfile: keyserver/Dockerfile
+    image: moment-keyserver:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env.prod
+    environment:
+      BIND_ADDR: 0.0.0.0:8080
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGSSLMODE: verify-full
+      PGSSLROOTCERT: /var/run/postgres-ca/ca.crt
+      PUBLICATION_AUTHORITY_KEYPAIR: /var/run/moment-secrets/publication-authority.json
+      ORT_DYLIB_PATH: /opt/onnxruntime/lib/libonnxruntime.so
+      MODERATION_MODEL_PATH: /app/assets/marqo-nsfw.onnx
+      MODERATION_POLICY_PATH: /app/assets/policy.json
+    volumes:
+      - ./secrets:/var/run/moment-secrets:ro
+      - postgres_ca:/var/run/postgres-ca:ro
+    ports:
+      - "127.0.0.1:${MOMENT_BIND_PORT:-8080}:8080"
+    networks: [db, egress]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+  postgres_tls:
+  postgres_ca:
+
+networks:
+  db:
+    internal: true
+  egress: {}
