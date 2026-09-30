@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: program
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -77,7 +77,7 @@ jobs:
     env:
       TEST_DATABASE_URL: postgres://moment:moment-local-test@127.0.0.1:55432/moment_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -94,7 +94,7 @@ jobs:
     name: Helm chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: azure/setup-helm@v4
       - uses: actions/setup-python@v5
         with:
@@ -115,7 +115,7 @@ jobs:
       MOMENT_DEVNET_BACKEND_URL: ${{ vars.MOMENT_DEVNET_BACKEND_URL }}
       MOMENT_DEVNET_PROGRAM_ID: ${{ vars.MOMENT_DEVNET_PROGRAM_ID }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate release configuration
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -174,28 +174,33 @@ jobs:
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/moment-release.jks"
           echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/moment-release.jks" >> "$GITHUB_ENV"
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
-          # Override v3's default, which includes the unavailable legacy "tools" package.
+          # Override the default, which includes the unavailable legacy "tools" package.
           packages: platform-tools
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
       - name: Unit tests (devnet)
         run: ./gradlew --no-daemon :app:testDevnetDebugUnitTest
       - name: Lint
         run: ./gradlew --no-daemon :app:lintDevnetDebug
       - name: Debug APK
         run: ./gradlew --no-daemon :app:assembleDevnetDebug
-      - uses: actions/upload-artifact@v4
-        if: github.ref_type != 'tag'
+      # ~200 Mo par APK : le stockage Actions et Packages (500 Mo en offre
+      # gratuite, partagé par tout le compte) ne supporte pas un envoi par push.
+      # Seulement à la demande (« Run workflow »), gardé un jour ; les releases
+      # taguées vont dans GitHub Releases, qui ne compte pas dans ce quota.
+      - uses: actions/upload-artifact@v5
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: moment-apk-${{ github.sha }}
           path: |
             app/app/build/outputs/apk/devnet/debug/app-devnet-debug.apk
-          retention-days: 14
+          retention-days: 1
+          compression-level: 0
           if-no-files-found: error
       - name: Signed devnet release APK
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -236,14 +241,17 @@ jobs:
 
   image:
     name: Keyserver image (GHCR)
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    # Une version d'image pèse plusieurs centaines de Mo et compte dans le même
+    # quota que les artefacts : publiée sur tag de version ou à la demande,
+    # jamais à chaque push.
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [keyserver, helm]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Image name (GHCR requires lowercase)
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/moment-keyserver" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
@@ -257,9 +265,9 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
-            type=sha
-            type=ref,event=branch
             type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
       - uses: docker/build-push-action@v6
         env:
           # Keep the job summary without storing an additional build-record artifact.
@@ -271,5 +279,16 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Pas d'attestation : chacune serait une version de paquet de plus.
+          provenance: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # Demande que le dépôt ait le rôle Admin sur le paquet (réglages du paquet,
+      # « Manage Actions access ») ; sinon le ménage échoue sans bloquer la publication.
+      - name: Keep only the last image versions
+        uses: actions/delete-package-versions@v5
+        continue-on-error: true
+        with:
+          package-name: moment-keyserver
+          package-type: container
+          min-versions-to-keep: 3
