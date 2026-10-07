@@ -43,6 +43,8 @@ Text-value files must not include a trailing newline. All backend replicas use t
 
 ## Configure and install
 
+CI does not publish the keyserver image. [Build it and push it](../../README.md#docker-image) to a registry that the cluster can pull from, then reference it in `image`.
+
 Create a values file containing deployment settings, without credentials:
 
 ```yaml

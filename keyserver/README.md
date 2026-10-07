@@ -150,6 +150,31 @@ The IP quota is 120 requests per minute per pod. Behind a proxy, configure only 
 
 There is no automatic post/blob retention cleanup. Define coordinated database/object retention before long-running operation. Back up PostgreSQL, private R2 objects, and the encryption master key independently and validate recovery together.
 
+## Docker image
+
+CI does not publish the keyserver image; build it yourself from [`Dockerfile`](Dockerfile). The build context must be the **repository root**, because the image also bundles the moderation model and policy from `app/app/src/main/assets/moderation/`. The Dockerfile uses BuildKit cache mounts, which current Docker Desktop and Docker Engine enable by default.
+
+From the repository root:
+
+```sh
+docker build -f keyserver/Dockerfile -t moment-keyserver:local .
+```
+
+The image contains the release binary, ONNX Runtime CPU 1.23.2, and the moderation assets. It runs as an unprivileged user and listens on port `8080`. Supported platforms are `linux/amd64` and `linux/arm64`. The image targets the build machine's architecture by default. To build an image for an x86_64 server from an Apple Silicon Mac, set the platform explicitly; the Rust build then runs under emulation and is much slower:
+
+```sh
+docker build --platform linux/amd64 -f keyserver/Dockerfile -t moment-keyserver:local .
+```
+
+The container needs the same configuration as a local run, including PostgreSQL, the publication keypair, and the encryption master key. Use the Compose deployment below rather than a bare `docker run`; it builds this image itself.
+
+For the [Helm chart](helm/moment-keyserver/README.md), push the image to a registry that your cluster can pull from, and reference it in `image.repository` and `image.tag`:
+
+```sh
+docker tag moment-keyserver:local ghcr.io/YOUR_ACCOUNT/moment-keyserver:0.3.0
+docker push ghcr.io/YOUR_ACCOUNT/moment-keyserver:0.3.0
+```
+
 ## Docker Compose on a VPS (devnet)
 
 [`compose.prod.yaml`](compose.prod.yaml) runs the keyserver and a persistent PostgreSQL 17 instance. It does not start Traefik or expose PostgreSQL. The API is published only on the VPS loopback address, `127.0.0.1:8080` by default. PostgreSQL is on a private Docker network; an initialization job creates a private CA and server certificate so the keyserver can use `PGSSLMODE=verify-full`. The backend image is built locally from the repository, so GHCR access is not required.
