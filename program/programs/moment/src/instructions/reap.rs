@@ -13,6 +13,7 @@ use crate::{
 pub struct Reap<'info> {
     #[account(mut)]
     pub caller: Signer<'info>,
+    /// CHECK: `profile` binds this address through its owner field and PDA seeds.
     pub owner: UncheckedAccount<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,

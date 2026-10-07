@@ -12,6 +12,8 @@ use crate::{
 pub struct CloseCheckIn<'info> {
     pub caller: Signer<'info>,
     #[account(mut)]
+    /// CHECK: `check_in` validates this address with `has_one = owner` and its PDA seeds;
+    /// it only receives the rent returned when that account closes.
     pub owner: UncheckedAccount<'info>,
     #[account(
         mut,
