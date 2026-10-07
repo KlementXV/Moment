@@ -97,6 +97,8 @@ pub fn handle_cancel_exit(ctx: Context<CancelExit>) -> Result<()> {
 pub struct FinalizeExit<'info> {
     #[account(mut)]
     pub caller: Signer<'info>,
+    /// CHECK: `profile` binds this address through its owner field and PDA seeds;
+    /// `owner_token_account` also checks that it belongs to this owner.
     pub owner: UncheckedAccount<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Account<'info, Config>,

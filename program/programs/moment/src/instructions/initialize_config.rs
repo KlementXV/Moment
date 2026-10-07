@@ -36,6 +36,8 @@ impl ConfigParams {
 pub struct InitializeConfig<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
+    /// CHECK: This public key is stored as the publication authority; it does not
+    /// sign or supply account data during initialization.
     pub publication_authority: UncheckedAccount<'info>,
     #[account(
         init,
