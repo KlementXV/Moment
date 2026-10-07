@@ -67,7 +67,7 @@ The keyserver is a trusted service: it can decrypt photos for moderation and con
 
 ## Project status
 
-**Version 0.3.0 — devnet prototype.**
+**Version 0.3.1 — devnet prototype.**
 
 The repository includes the Android app, Anchor program, Rust backend, Docker image definition, and Kubernetes Helm chart. Wallet transactions, camera capture, encrypted publication, backend authorization, and feed retrieval are implemented.
 
@@ -78,6 +78,7 @@ The current Android devnet defaults are:
 | Program ID | `ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6` |
 | Test SKR mint | `FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5` |
 | Test mint decimals | 9 |
+| Keyserver | `https://moment-dev.noodler.cc` |
 
 The backend URL must be configured to publish and retrieve real Moments. A complete run with two physical wallets and a deployed R2 backend remains to be validated. Moderation thresholds are experimental and require calibration before production publication. The mainnet build variant is included, but a production deployment is still pending.
 
@@ -99,10 +100,10 @@ moment.devnet.rpcUrl=https://api.devnet.solana.com
 moment.devnet.programId=ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6
 moment.devnet.skrMint=FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5
 moment.devnet.skrDecimals=9
-moment.devnet.backendUrl=https://YOUR_DEVNET_BACKEND
+moment.devnet.backendUrl=https://moment-dev.noodler.cc
 ```
 
-Replace the backend placeholder with your service URL. If you deploy your own program and test mint, update those addresses too. `local.properties` is ignored by Git.
+`https://moment-dev.noodler.cc` is the public devnet keyserver used with the program and test mint above. If you deploy your own keyserver, program, or test mint, replace those values. `local.properties` is ignored by Git.
 
 Settings can also be supplied through environment variables such as `MOMENT_DEVNET_BACKEND_URL` and `MOMENT_DEVNET_RPC_URL`. Network-specific properties take precedence over environment variables. The app reads the mint's actual decimals on-chain before allowing staking.
 
@@ -148,7 +149,7 @@ For an interface preview, the profile also provides an optional demo feed with i
 - [Keyserver configuration and API](keyserver/README.md)
 - [Kubernetes deployment](keyserver/helm/moment-keyserver/README.md)
 
-The CI builds and tests the program and backend, validates the Helm chart, and builds the devnet Android variant. Branch builds provide a debug APK as a workflow artifact; version tags publish a signed devnet APK in GitHub Releases. The mainnet variant remains available for local builds but is excluded from CI until its deployment is ready. Pushes can also publish the keyserver image to GitHub Container Registry.
+The CI builds and tests the program and backend, validates the Helm chart, and builds the devnet Android variant. Manual workflow runs provide a debug APK as a workflow artifact; version tags publish a signed devnet APK in GitHub Releases. The mainnet variant remains available for local builds but is excluded from CI until its deployment is ready. CI does not publish the keyserver image; [build it with Docker](keyserver/README.md#docker-image).
 
 ## Repository layout
 
