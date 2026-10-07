@@ -12,7 +12,7 @@ val localProperties = Properties().apply {
 }
 
 // Stable local version; tagged CI builds override it with -PversionTag=vX.Y.Z.
-val versionTag = providers.gradleProperty("versionTag").orNull ?: "v0.3.0"
+val versionTag = providers.gradleProperty("versionTag").orNull ?: "v0.3.1"
 val versionMatch = Regex("^v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$").matchEntire(versionTag)
     ?: error("versionTag must be a stable tag such as v0.3.0 (pre-releases need a distinct versionCode scheme)")
 val (versionMajor, versionMinor, versionPatch) = versionMatch.destructured.toList().map(String::toInt)
@@ -36,7 +36,7 @@ val networks = mapOf(
         "programId" to "ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6",
         "skrMint" to "FKu7X2R2WVXDTaAQb6eE7xDtBJss9Yp3fYmBf6YyYAa5",
         "skrDecimals" to "9",
-        "backendUrl" to "",
+        "backendUrl" to "https://moment-dev.noodler.cc",
     ),
     "mainnet" to mapOf(
         "rpcUrl" to "https://api.mainnet-beta.solana.com",
@@ -102,6 +102,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Seeker is arm64; other ABIs would add ~100 MB of ONNX Runtime native libs.
+            ndk { abiFilters += "arm64-v8a" }
             if (releaseKeystorePath != null) signingConfig = signingConfigs.getByName("ciRelease")
         }
     }
