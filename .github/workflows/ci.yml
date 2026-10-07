@@ -173,7 +173,6 @@ jobs:
           done
           umask 077
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/moment-release.jks"
-          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/moment-release.jks" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -205,6 +204,9 @@ jobs:
       - name: Signed devnet release APK
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
+          # Seulement ici : Gradle exige les mots de passe dès qu'il voit ce chemin,
+          # ce qui ferait échouer les étapes de test et de lint.
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/moment-release.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
