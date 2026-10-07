@@ -239,56 +239,60 @@ jobs:
           gh release upload "$RELEASE_TAG" release-assets/*.apk release-assets/SHA256SUMS.txt --clobber
           gh release edit "$RELEASE_TAG" --draft=false
 
-  image:
-    name: Keyserver image (GHCR)
-    # Une version d'image pèse plusieurs centaines de Mo et compte dans le même
-    # quota que les artefacts : publiée sur tag de version ou à la demande,
-    # jamais à chaque push.
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: [keyserver, helm]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v5
-      - name: Image name (GHCR requires lowercase)
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/moment-keyserver" >> "$GITHUB_ENV"
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-            type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
-      - uses: docker/build-push-action@v6
-        env:
-          # Keep the job summary without storing an additional build-record artifact.
-          DOCKER_BUILD_RECORD_UPLOAD: "false"
-        with:
-          context: .
-          file: keyserver/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Pas d'attestation : chacune serait une version de paquet de plus.
-          provenance: false
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      # Demande que le dépôt ait le rôle Admin sur le paquet (réglages du paquet,
-      # « Manage Actions access ») ; sinon le ménage échoue sans bloquer la publication.
-      - name: Keep only the last image versions
-        uses: actions/delete-package-versions@v5
-        continue-on-error: true
-        with:
-          package-name: moment-keyserver
-          package-type: container
-          min-versions-to-keep: 3
+  # Publication de l'image keyserver sur GHCR désactivée : elle remplissait le quota
+  # de stockage Packages, et le déploiement Compose construit l'image sur le VPS.
+  # Construction manuelle : voir « Docker image » dans keyserver/README.md.
+  # Pour la réactiver, décommenter le job ci-dessous.
+  # image:
+  #   name: Keyserver image (GHCR)
+  #   # Une version d'image pèse plusieurs centaines de Mo et compte dans le même
+  #   # quota que les artefacts : publiée sur tag de version ou à la demande,
+  #   # jamais à chaque push.
+  #   if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+  #   needs: [keyserver, helm]
+  #   runs-on: ubuntu-latest
+  #   permissions:
+  #     contents: read
+  #     packages: write
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - name: Image name (GHCR requires lowercase)
+  #       run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/moment-keyserver" >> "$GITHUB_ENV"
+  #     - uses: docker/setup-buildx-action@v3
+  #     - uses: docker/login-action@v3
+  #       with:
+  #         registry: ghcr.io
+  #         username: ${{ github.actor }}
+  #         password: ${{ secrets.GITHUB_TOKEN }}
+  #     - id: meta
+  #       uses: docker/metadata-action@v5
+  #       with:
+  #         images: ${{ env.IMAGE }}
+  #         tags: |
+  #           type=semver,pattern={{version}}
+  #           type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+  #           type=raw,value=manual,enable=${{ github.event_name == 'workflow_dispatch' }}
+  #     - uses: docker/build-push-action@v6
+  #       env:
+  #         # Keep the job summary without storing an additional build-record artifact.
+  #         DOCKER_BUILD_RECORD_UPLOAD: "false"
+  #       with:
+  #         context: .
+  #         file: keyserver/Dockerfile
+  #         platforms: linux/amd64
+  #         push: true
+  #         tags: ${{ steps.meta.outputs.tags }}
+  #         labels: ${{ steps.meta.outputs.labels }}
+  #         # Pas d'attestation : chacune serait une version de paquet de plus.
+  #         provenance: false
+  #         cache-from: type=gha
+  #         cache-to: type=gha,mode=max
+  #     # Demande que le dépôt ait le rôle Admin sur le paquet (réglages du paquet,
+  #     # « Manage Actions access ») ; sinon le ménage échoue sans bloquer la publication.
+  #     - name: Keep only the last image versions
+  #       uses: actions/delete-package-versions@v5
+  #       continue-on-error: true
+  #       with:
+  #         package-name: moment-keyserver
+  #         package-type: container
+  #         min-versions-to-keep: 3

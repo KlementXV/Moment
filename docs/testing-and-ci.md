@@ -33,7 +33,7 @@ cargo test --locked
 
 Backend database integration tests use `TEST_DATABASE_URL` for a dedicated PostgreSQL test database. Native moderation tests also require the ONNX Runtime library configured through `ORT_DYLIB_PATH`.
 
-The [CI workflow](../.github/workflows/ci.yml) builds the program, runs Rust checks and tests, validates the Helm chart, and builds the devnet Android variant. A debug devnet APK from branch and pull-request runs is uploaded as a workflow artifact. Tags build a signed devnet APK for GitHub Releases. The mainnet variant is excluded from CI until its deployment is ready. After the backend and Helm jobs pass, pushes can also publish the keyserver image to GitHub Container Registry.
+The [CI workflow](../.github/workflows/ci.yml) builds the program, runs Rust checks and tests, validates the Helm chart, and builds the devnet Android variant. A debug devnet APK is uploaded as a workflow artifact only for manual runs (`workflow_dispatch`). Tags build a signed devnet APK for GitHub Releases. The mainnet variant is excluded from CI until its deployment is ready. CI does not publish the keyserver image; the [`image` job](../.github/workflows/ci.yml) is commented out to save Packages storage. [Build the image with Docker](../keyserver/README.md#docker-image) instead.
 
 ## GitHub Actions configuration
 
@@ -52,11 +52,11 @@ Debug devnet APKs can build without these variables. A tagged release fails befo
 
 RPC and backend URLs are embedded in the APK. Storing an RPC URL in a GitHub Secret does not keep a provider API key private once the APK is distributed.
 
-GitHub supplies `GITHUB_TOKEN` automatically for GHCR publication. The workflow builds and publishes the backend image; it does not deploy the server. R2 credentials, database passwords, Solana private keypairs, and `KEY_ENCRYPTION_KEY` belong in backend deployment secrets and are not required by this CI workflow.
+The workflow does not build, publish, or deploy the backend image. R2 credentials, database passwords, Solana private keypairs, and `KEY_ENCRYPTION_KEY` belong in backend deployment secrets and are not required by this CI workflow.
 
 ## APK releases
 
-Pushing a stable SemVer tag such as `v0.3.0` publishes a GitHub Release after program, backend, Helm, and Android checks pass. Gradle derives `versionName` and `versionCode` from the tag: `v0.3.0` becomes `0.3.0` and `3000`. Local builds without `-PversionTag` use `v0.3.0` as a development fallback. The release contains one signed devnet APK and `SHA256SUMS.txt`; release uploads go directly to GitHub Releases without using Actions artifacts. Image publication runs independently.
+Pushing a stable SemVer tag such as `v0.3.0` publishes a GitHub Release after program, backend, Helm, and Android checks pass. Gradle derives `versionName` and `versionCode` from the tag: `v0.3.0` becomes `0.3.0` and `3000`. Local builds without `-PversionTag` use `v0.3.1` as a development fallback. The release contains one signed devnet APK and `SHA256SUMS.txt`; release uploads go directly to GitHub Releases without using Actions artifacts.
 
 For each new version:
 
@@ -84,7 +84,7 @@ The tagged build refuses to publish if a signing secret is missing. A previously
 
 ## Troubleshooting image publication
 
-If the image builds successfully but GHCR rejects the push with `permission_denied: read_package`, check the package's **Package settings → Manage Actions access**. Add `KlementXV/Moment` with the **Write** role, or verify that its existing role permits publication. The workflow already requests `packages: write`; that permission does not replace the package's access rules. Linking an existing package to a repository alone does not necessarily grant Actions access.
+This applies only if you uncomment the `image` job. If the image builds successfully but GHCR rejects the push with `permission_denied: read_package`, check the package's **Package settings → Manage Actions access**. Add `KlementXV/Moment` with the **Write** role, or verify that its existing role permits publication. The workflow already requests `packages: write`; that permission does not replace the package's access rules. Linking an existing package to a repository alone does not necessarily grant Actions access.
 
 See [GitHub's package access documentation](https://docs.github.com/en/packages/learn-github-packages/configuring-a-packages-access-control-and-visibility).
 
