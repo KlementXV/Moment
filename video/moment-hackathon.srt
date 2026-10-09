@@ -1,0 +1,136 @@
+1
+00:00:02,600 --> 00:00:03,678
+This is Moment.
+
+2
+00:00:04,028 --> 00:00:08,770
+One moment a day, for the Seeker community, powered by Solana and SKR.
+
+3
+00:00:10,320 --> 00:00:12,536
+Social apps reward endless scrolling.
+
+4
+00:00:12,836 --> 00:00:15,367
+Moment rewards something rarer: showing up.
+
+5
+00:00:15,767 --> 00:00:20,174
+Once a day, you capture what's in front of you, and yourself, in the same instant.
+
+6
+00:00:20,474 --> 00:00:22,268
+And you put your presence on the line.
+
+7
+00:00:23,518 --> 00:00:26,155
+Connect your wallet through Mobile Wallet Adapter.
+
+8
+00:00:26,705 --> 00:00:31,783
+Stake at least five hundred SKR. It stays yours, locked in the program's vault.
+
+9
+00:00:32,333 --> 00:00:34,721
+Take a photo of the scene, then a selfie.
+
+10
+00:00:36,171 --> 00:00:37,854
+Review, sign, and publish.
+
+11
+00:00:38,704 --> 00:00:42,529
+Your Moment unlocks today's community feed, and your streak grows.
+
+12
+00:00:44,479 --> 00:00:48,302
+Now, the SKR economy. Every UTC day is a round.
+
+13
+00:00:48,652 --> 00:00:51,927
+Miss one, and ten percent of your remaining stake is deducted.
+
+14
+00:00:52,177 --> 00:00:56,169
+A thousand SKR becomes nine hundred, then eight hundred and ten.
+
+15
+00:00:56,519 --> 00:01:01,156
+Keep missing, and it keeps shrinking: after a month, barely four percent is left.
+
+16
+00:01:02,406 --> 00:01:04,387
+Those penalties fund that day's pool.
+
+17
+00:01:04,737 --> 00:01:12,306
+At six AM UTC the next morning, it closes, and it's split between everyone who posted, pro rata to their stake.
+
+18
+00:01:12,755 --> 00:01:18,659
+Stake fifteen hundred out of a three thousand total, and you take half the pool, added straight to your stake.
+
+19
+00:01:20,509 --> 00:01:24,742
+No tokens are minted to pay rewards, and there's no protocol fee.
+
+20
+00:01:24,992 --> 00:01:28,674
+Every reward is SKR forfeited by someone who didn't show up.
+
+21
+00:01:29,024 --> 00:01:32,313
+If nobody posts, the pool rolls over to the next day.
+
+22
+00:01:32,763 --> 00:01:37,641
+And when you're done, request a withdrawal: forty-eight hours later, your stake comes home.
+
+23
+00:01:39,091 --> 00:01:41,658
+For SKR, that means real utility:
+
+24
+00:01:41,808 --> 00:01:50,532
+a daily reason to hold and lock the token, rewards for consistency rather than speculation, and identity through .skr names.
+
+25
+00:01:52,182 --> 00:01:55,373
+Under the hood: a native Kotlin app, built for Seeker.
+
+26
+00:01:55,723 --> 00:02:02,417
+Your wallet signs a manifest of both photo hashes. Its SHA-256 becomes the on-chain commitment.
+
+27
+00:02:02,767 --> 00:02:07,066
+Photos are stripped of metadata, then encrypted with AES-GCM.
+
+28
+00:02:07,416 --> 00:02:13,873
+An on-device model screens them. Then our Rust keyserver re-checks everything, and cosigns the check-in.
+
+29
+00:02:14,223 --> 00:02:17,215
+It can authorize a post. It can never move your stake.
+
+30
+00:02:18,665 --> 00:02:26,094
+On chain, an Anchor program enforces every rule, across four accounts: Config, Profile, Day Pool, and Check-In.
+
+31
+00:02:26,444 --> 00:02:34,006
+Settlement is permissionless: a crank settles missed days, rolls empty pools forward, and refunds rent from old check-ins.
+
+32
+00:02:35,256 --> 00:02:41,457
+Moment is running on devnet today: Android app, Anchor program, Rust backend, tests, and CI.
+
+33
+00:02:41,907 --> 00:02:43,777
+Show up. Capture. Share. Earn.
+
+34
+00:02:44,427 --> 00:02:46,165
+Moment. One moment a day.
+

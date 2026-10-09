@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Moment — hackathon film</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="scenes.css">
+</head>
+<body>
+<div id="stage">
+  <div class="layer" id="bg">
+    <div class="glow" id="glow1"></div>
+    <div class="glow" id="glow2"></div>
+    <div class="glow" id="glow3"></div>
+  </div>
+
+  <!-- 1 · Intro -->
+  <section class="scene" id="sc-intro">
+    <div class="abs" id="i-logo" style="left:790px;top:370px;width:340px;height:340px">
+      <svg id="i-ring" class="abs" viewBox="0 0 400 400" style="left:-30px;top:-30px;width:400px;height:400px;overflow:visible">
+        <defs><linearGradient id="i-ringg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4C56F"/><stop offset=".5" stop-color="#EA7666"/><stop offset="1" stop-color="#E94F75"/></linearGradient></defs>
+        <circle class="ring-track" cx="200" cy="200" r="190" stroke-width="3"/>
+        <circle id="i-arc" cx="200" cy="200" r="190" fill="none" stroke="url(#i-ringg)" stroke-width="8" stroke-linecap="round" transform="rotate(-90 200 200)"/>
+        <circle id="i-headbg" r="13" fill="#0D0A08"/>
+        <circle id="i-head" r="7" fill="#F4C56F"/>
+      </svg>
+      <div id="i-mark" class="abs" style="left:40px;top:40px;width:260px;height:260px"></div>
+      <div id="i-ripple" class="abs" style="left:234px;top:50px;width:60px;height:60px;border-radius:50%;border:3px solid #EE5A7C"></div>
+    </div>
+    <div id="i-word" class="abs" style="left:0;right:0;top:430px;text-align:center;font:800 190px/1.05 var(--display);letter-spacing:-.045em">Moment</div>
+    <div id="i-tag" class="abs h2" style="left:0;right:0;top:670px;text-align:center"><span class="g">One moment a day.</span></div>
+    <div id="i-sub" class="abs body" style="left:0;right:0;top:790px;text-align:center">For the Seeker community · powered by Solana and SKR</div>
+    <div id="i-chips" class="abs" style="left:0;right:0;top:868px;display:flex;justify-content:center;gap:16px">
+      <div class="chip" id="i-chip0"><span class="soldot"></span>Solana Mobile · Seeker</div>
+      <div class="chip" id="i-chip1"><span class="minicoin">S</span>SKR staking</div>
+      <div class="chip" id="i-chip2">CLOCK IN Hackathon</div>
+    </div>
+  </section>
+
+  <!-- 2 · Problem -->
+  <section class="scene" id="sc-problem">
+    <div class="abs" id="p-wallwrap" style="left:960px;top:-300px;width:1200px;height:1700px;transform:rotate(-9deg)">
+      <div id="p-wall" class="abs" style="inset:0"></div>
+    </div>
+    <div id="p-h1" class="abs h1" style="left:160px;top:350px;width:860px">Social apps reward endless&nbsp;scrolling.</div>
+    <div id="p-h2" class="abs h1" style="left:160px;top:370px;width:1600px;text-align:center">Moment rewards something rarer: <span class="g">showing&nbsp;up.</span></div>
+    <div id="p-photo" class="abs" style="left:1080px;top:180px;width:560px;height:700px;border-radius:40px;overflow:hidden;box-shadow:0 40px 120px rgba(0,0,0,.6)">
+      <div id="p-land" class="abs" style="inset:0"></div>
+      <div id="p-scrim" class="abs" style="inset:0;background:rgba(10,8,6,.45)"></div>
+      <div id="p-vf" class="abs" style="inset:34px"><i class="vf tl"></i><i class="vf tr"></i><i class="vf bl"></i><i class="vf br"></i></div>
+      <div id="p-selfie" class="abs" style="left:26px;top:26px;width:176px;height:235px;border-radius:24px;overflow:hidden;border:4px solid var(--ink)">
+        <div id="p-port" class="abs" style="inset:0"></div>
+        <div id="p-sflash" class="abs" style="inset:0;background:#fff;opacity:0"></div>
+      </div>
+      <div id="p-flash" class="abs" style="inset:0;background:#fff;opacity:0"></div>
+    </div>
+    <div id="p-l1" class="abs h2" style="left:160px;top:390px;width:860px">What's in front of&nbsp;you.</div>
+    <div id="p-l2" class="abs h2" style="left:160px;top:490px;width:860px">And <span class="g">yourself.</span></div>
+    <div id="p-l3" class="abs body" style="left:160px;top:620px;width:800px">Two cameras · one instant · once a day.</div>
+    <div id="p-h3" class="abs h1" style="left:160px;top:400px;width:860px">Put your presence <span class="g">on&nbsp;the&nbsp;line.</span></div>
+    <div id="p-stake" class="abs chip brand" style="left:1180px;top:812px;font-size:30px;padding:20px 34px">{lock} 500 SKR at stake</div>
+  </section>
+
+  <!-- 3 · Ritual -->
+  <section class="scene" id="sc-ritual">
+    <div id="r-kicker" class="abs kicker" style="left:160px;top:150px">01 · The daily ritual</div>
+    <div id="r-steps" class="abs" style="left:160px;top:250px;width:860px;height:700px">
+      <div id="r-rail" class="abs" style="left:31px;top:40px;width:2px;height:568px;background:var(--line)"></div>
+      <div id="r-railfill" class="abs" style="left:31px;top:40px;width:2px;height:568px;background:var(--grad);transform-origin:50% 0"></div>
+    </div>
+    <div id="r-phone" class="phone" style="left:1060px;top:106px">
+      <div class="screen" id="r-screen">
+        <div class="status"><span>9:41</span><span class="sicons"><i></i><i></i><i></i></span></div>
+
+        <div class="scr" id="r-s1">
+          <div id="r-s1logo" style="width:64px;height:64px;margin-top:34px"></div>
+          <div class="title" style="margin-top:22px">Connect your wallet</div>
+          <div class="txt" style="margin-top:12px">Your stake, tips and boosts go through your Solana wallet. You sign every transaction: nothing is sent without you.</div>
+          <div class="wcard"><div class="wico">{wallet}</div><div><div style="font:600 17px/1.2 var(--text)">Mobile Wallet Adapter</div><div class="small" style="margin-top:4px">Keys never leave your wallet</div></div></div>
+          <div class="btn" style="bottom:86px" id="r-btn1">Connect my wallet</div>
+          <div class="small" style="position:absolute;bottom:40px;left:30px;right:30px;text-align:center">Network fees, in SOL, are shown before each signature.</div>
+          <div class="toast" id="r-toast1">{check} Wallet connected · 7xKX…9fQa</div>
+        </div>
+
+        <div class="scr" id="r-s2">
+          <div class="title" style="margin-top:28px">Put your stake in play</div>
+          <div class="txt" style="margin-top:12px">Stake at least 500 SKR: they remain yours, locked while you play.</div>
+          <div class="stakebox">
+            <div class="small">Your stake</div>
+            <div class="stakerow">
+              <div class="round">{minus}</div>
+              <div><span id="r-amt" class="tnum" style="font:800 56px/1 var(--display);letter-spacing:-.03em">0</span><span style="font:700 22px/1 var(--display);color:var(--muted);margin-left:8px">SKR</span></div>
+              <div class="round" id="r-plus">{plus}</div>
+            </div>
+            <div class="small" style="text-align:center">Your balance is 1,000 SKR.</div>
+          </div>
+          <div class="rule">{clock}<span>A day without a moment costs <b>10%</b>.</span></div>
+          <div class="btn" style="bottom:60px" id="r-btn2">Stake 500 SKR</div>
+          <div class="okpane" id="r-ok2">
+            <div class="okcirc">{check}</div>
+            <div class="title" style="text-align:center;margin-top:24px">Your stake is in play</div>
+            <div class="txt" style="text-align:center;margin-top:10px">500 SKR staked · locked in the program vault</div>
+          </div>
+        </div>
+
+        <div class="scr" id="r-s3" style="padding:0">
+          <div id="r-land" class="abs" style="inset:0"></div>
+          <div class="campill" style="top:66px">Capture the scene</div>
+          <div class="camx">{close}</div>
+          <div class="campill small2" style="bottom:150px">You have 14 h left to capture today's moment.</div>
+          <div class="shutter" id="r-shut1"><i></i></div>
+          <div id="r-flash1" class="abs" style="inset:0;background:#fff;opacity:0"></div>
+        </div>
+
+        <div class="scr" id="r-s4" style="padding:0">
+          <div id="r-port" class="abs" style="inset:0"></div>
+          <div class="campill" style="top:66px">A selfie to complete the moment.</div>
+          <div class="camx">{close}</div>
+          <div id="r-thumb" class="abs" style="left:24px;bottom:44px;width:66px;height:88px;border-radius:12px;overflow:hidden;border:2px solid #fff"></div>
+          <div class="shutter" id="r-shut2"><i></i></div>
+          <div id="r-flash2" class="abs" style="inset:0;background:#fff;opacity:0"></div>
+        </div>
+
+        <div class="scr" id="r-s5">
+          <div class="title" style="margin-top:6px;font-size:26px">Your moment</div>
+          <div class="photo" id="r-pair" style="height:430px;margin-top:16px"></div>
+          <div class="capfield">Same bench, same coffee. Works for me.</div>
+          <div class="anl" id="r-anl1"><i class="spin" id="r-spin"></i>Checking both photos on this device…</div>
+          <div class="anl ok" id="r-anl2">{check} Check complete: no sensitive content detected.</div>
+          <div class="btn" style="bottom:34px" id="r-btn5">Publish</div>
+          <div class="toast" id="r-toast3">{check} Moment published. Your stake is safe.</div>
+        </div>
+
+        <div class="scr" id="r-s6" style="padding:56px 22px 0">
+          <div class="feedhead"><span>Moments</span><div class="avatar" style="width:36px;height:36px"><div style="font-size:14px">K</div></div></div>
+          <div class="streakcard" id="r-streak">
+            <svg viewBox="0 0 64 64" width="56" height="56"><circle cx="32" cy="32" r="27" fill="none" stroke="#2F2721" stroke-width="3"/><circle cx="32" cy="32" r="27" fill="none" stroke="#3ECFB0" stroke-width="5" stroke-linecap="round"/><text x="32" y="39" text-anchor="middle" font-family="Inter Display" font-weight="700" font-size="20" fill="#F7F0E9">13</text></svg>
+            <div><div style="font:600 16px/1.2 var(--text)">13 day streak</div><div style="font:500 13px/1.3 var(--text);color:var(--success);margin-top:3px">Moment confirmed · well done!</div></div>
+          </div>
+          <div id="r-feedwrap" style="position:relative;height:640px;overflow:hidden;margin-top:12px;border-radius:30px">
+            <div id="r-feed"></div>
+            <div id="r-lock" class="abs" style="inset:0;background:rgba(13,10,8,.55);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px">
+              <div class="lockcirc" id="r-lockic">{lock}</div>
+              <div style="font:700 22px/1.25 var(--display);margin-top:18px">Your moment unlocks the feed</div>
+              <div class="txt" style="margin-top:8px;font-size:15px">Capture today's photo to see everyone else's.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="scrim" id="r-scrim"></div>
+        <div class="sheet" id="r-sh1">
+          <div class="grab"></div>
+          <div class="whead">{shield} Wallet · Devnet</div>
+          <div class="stitle">Connect to Moment?</div>
+          <div class="txt" style="margin-bottom:10px">moment-dev.noodler.cc</div>
+          <div class="row"><span>Account</span><span class="mono">7xKX…9fQa</span></div>
+          <div class="row"><span>Network</span><span>Solana Devnet</span></div>
+          <div class="btns"><div>Cancel</div><div class="primary">Connect</div></div>
+        </div>
+        <div class="sheet" id="r-sh2">
+          <div class="grab"></div>
+          <div class="whead">{shield} Wallet · Devnet</div>
+          <div class="stitle">Approve transaction</div>
+          <div class="row"><span>Program</span><span>Moment · stake</span></div>
+          <div class="row"><span>Amount</span><span>500 SKR</span></div>
+          <div class="row"><span>Network fee</span><span>&lt; 0.01 SOL</span></div>
+          <div class="btns"><div>Reject</div><div class="primary">Approve</div></div>
+        </div>
+        <div class="sheet" id="r-sh3">
+          <div class="grab"></div>
+          <div class="whead">{shield} Wallet · Devnet</div>
+          <div class="stitle">Sign &amp; publish</div>
+          <div class="row"><span>Message</span><span class="mono" style="font-size:13px">moment-manifest-v1</span></div>
+          <div class="row"><span>Transaction</span><span>check_in</span></div>
+          <div class="row"><span>Cosigner</span><span>Publication authority</span></div>
+          <div class="btns"><div>Reject</div><div class="primary">Approve</div></div>
+        </div>
+        <div class="ripple" id="r-rip"></div>
+      </div>
+      <div class="punch"></div>
+    </div>
+    <div id="r-tagA" class="abs chip" style="left:1530px;top:300px">{wallet} Mobile Wallet Adapter</div>
+    <div id="r-vault" class="abs card" style="left:1530px;top:390px;width:300px;padding:24px 26px">
+      <div style="display:flex;gap:14px;align-items:center"><div class="vaultic">{lock}</div><div><div style="font:700 26px/1.1 var(--display)">Program vault</div><div class="mono" style="font-size:16px;color:var(--muted);margin-top:6px">PDA · ["vault"]</div></div></div>
+      <div style="font:800 44px/1 var(--display);margin-top:20px" class="tnum"><span id="r-vamt">0</span> <span style="font-size:22px;color:var(--muted)">SKR</span></div>
+    </div>
+    <div id="r-tagB" class="abs chip" style="left:1530px;top:360px">{camera} CameraX · two cameras</div>
+    <div id="r-tagC" class="abs chip" style="left:1530px;top:330px">{pen} Wallet-signed manifest</div>
+    <div id="r-tagC2" class="abs chip" style="left:1530px;top:410px">{shield} Cosigned check_in</div>
+    <div id="r-tagD" class="abs chip ok" style="left:1530px;top:350px">{check} Today's feed unlocked</div>
+    <div id="r-tagE" class="abs chip brand" style="left:1530px;top:430px">{fire} 13 day streak</div>
+    <div id="r-coins"></div>
+  </section>
+
+  <!-- 4 · Decay -->
+  <section class="scene" id="sc-decay">
+    <div id="d-kicker" class="abs kicker" style="left:160px;top:150px">02 · The SKR economy</div>
+    <div id="d-h" class="abs h2" style="left:160px;top:200px;width:1600px">Every UTC day is a round.</div>
+    <div id="d-ringwrap" class="abs" style="left:190px;top:380px;width:580px;height:580px">
+      <svg id="d-ring" viewBox="0 0 580 580" width="580" height="580" style="overflow:visible">
+        <defs><linearGradient id="d-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4C56F"/><stop offset="1" stop-color="#E94F75"/></linearGradient></defs>
+        <g id="d-ticks"></g>
+        <circle cx="290" cy="290" r="230" fill="none" stroke="#2F2721" stroke-width="4"/>
+        <circle id="d-arc" cx="290" cy="290" r="230" fill="none" stroke="url(#d-g)" stroke-width="16" stroke-linecap="round" transform="rotate(-90 290 290)"/>
+        <circle id="d-arc2" cx="290" cy="290" r="230" fill="none" stroke="#FF7A7A" stroke-width="16" stroke-linecap="round" transform="rotate(-90 290 290)"/>
+        <circle id="d-headbg" r="17" fill="#0D0A08"/>
+        <circle id="d-head" r="9" fill="#F4C56F"/>
+      </svg>
+      <div id="d-c1" class="abs ringc"><div style="font:800 110px/1 var(--display);letter-spacing:-.04em">24 h</div><div class="muted" style="font:500 26px/1.3 var(--text);margin-top:8px">one UTC day</div></div>
+      <div id="d-c2" class="abs ringc"><div class="xcirc">{close}</div><div style="font:700 40px/1.1 var(--display);color:var(--danger);margin-top:16px">No Moment</div></div>
+    </div>
+    <div id="d-pct" class="abs" style="left:620px;top:380px;padding:14px 26px;border-radius:999px;background:var(--danger-c);border:1.5px solid rgba(255,122,122,.4);color:var(--danger);font:800 44px/1 var(--display)">−10%</div>
+    <div id="d-panel" class="abs" style="left:900px;top:350px">
+      <div class="muted" style="font:600 24px/1 var(--text);letter-spacing:.14em;text-transform:uppercase">Your stake</div>
+      <div style="margin-top:14px;white-space:nowrap"><span id="d-num" class="tnum" style="font:800 140px/1 var(--display);letter-spacing:-.045em">1,000</span><span style="font:700 46px/1 var(--display);color:var(--muted);margin-left:16px">SKR</span></div>
+    </div>
+    <div id="d-minus" class="abs chip bad" style="left:1400px;top:420px;font-size:28px">−100 SKR → daily pool</div>
+    <div id="d-chart" class="abs" style="left:900px;top:560px;width:880px;height:420px"></div>
+    <div id="d-note" class="abs chip bad" style="left:1180px;top:560px;font-size:26px">After 30 missed days: 42 SKR left · 4.2%</div>
+  </section>
+
+  <!-- 5 · Pool -->
+  <section class="scene" id="sc-pool">
+    <div id="pl-kicker" class="abs kicker" style="left:160px;top:150px">03 · The daily pool</div>
+    <div id="pl-h" class="abs h2" style="left:160px;top:200px;width:1600px">Penalties fund that day's pool.</div>
+    <div id="pl-mh" class="abs colhead" style="left:180px;top:378px">Missed today</div>
+    <div id="pl-ph" class="abs colhead" style="left:1330px;top:378px">Posted today · <span id="pl-total">3,000</span> SKR staked</div>
+    <div id="pl-missed"></div>
+    <div id="pl-pubs"></div>
+    <div id="pl-orb" class="abs" style="left:770px;top:440px;width:380px;height:380px">
+      <div class="orbglow"></div>
+      <svg class="abs" viewBox="0 0 380 380" width="380" height="380" style="left:0;top:0;overflow:visible">
+        <defs><linearGradient id="pl-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4C56F"/><stop offset=".5" stop-color="#EE9959"/><stop offset="1" stop-color="#E94F75"/></linearGradient></defs>
+        <circle cx="190" cy="190" r="180" fill="#120E0B" stroke="url(#pl-g)" stroke-width="3"/>
+        <circle cx="190" cy="190" r="150" fill="none" stroke="#2F2721" stroke-width="2" stroke-dasharray="3 9"/>
+        <circle id="pl-closering" cx="190" cy="190" r="196" fill="none" stroke="#F4C56F" stroke-width="5" stroke-linecap="round" transform="rotate(-90 190 190)"/>
+      </svg>
+      <div class="abs" style="inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+        <div class="muted" style="font:600 20px/1 var(--text);letter-spacing:.22em">DAY POOL</div>
+        <div style="margin-top:14px;white-space:nowrap"><span id="pl-amt" class="tnum" style="font:800 96px/1 var(--display);letter-spacing:-.04em">0</span></div>
+        <div class="muted" style="font:600 24px/1 var(--display);margin-top:8px">SKR · Thu, Oct 8</div>
+      </div>
+      <div id="pl-lock" class="abs lockbadge" style="left:160px;top:-30px">{lock}</div>
+    </div>
+    <div id="pl-clock1" class="abs chip" style="left:0;top:0">{clock} Closes 06:00 UTC, next morning</div>
+    <div id="pl-clock2" class="abs chip ok" style="left:0;top:0">{lock} Closed · split begins</div>
+    <div id="pl-formula" class="abs card" style="left:560px;top:880px;width:800px;height:112px">
+      <div id="pl-f1" class="abs formula">your share = pool × your stake ÷ total stake</div>
+      <div id="pl-f2" class="abs formula"><b>60 SKR</b> = 120 × 1,500 ÷ 3,000</div>
+    </div>
+    <div id="pl-parts"></div>
+  </section>
+
+  <!-- 6 · Fair -->
+  <section class="scene" id="sc-fair">
+    <div id="f-kicker" class="abs kicker" style="left:160px;top:150px">04 · Sustainable by design</div>
+    <div id="f-h" class="abs h2" style="left:160px;top:200px;width:1600px">Rewards come from absence, not inflation.</div>
+    <div id="f-t0" class="abs tile" style="left:160px;top:330px">
+      <div class="tglow" id="f-g0"></div>
+      <div class="abs" style="left:56px;top:46px;width:300px"><div id="f-z1" class="bigstat g">0</div><div class="tlabel">new tokens minted to pay rewards</div></div>
+      <div class="abs" style="left:392px;top:60px;width:1.5px;height:200px;background:var(--line)"></div>
+      <div class="abs" style="left:440px;top:46px;width:300px"><div id="f-z2" class="bigstat g">0%</div><div class="tlabel">protocol fee on the pool</div></div>
+    </div>
+    <div id="f-t1" class="abs tile" style="left:976px;top:330px">
+      <div class="tglow" id="f-g1"></div>
+      <div id="f-flow" class="abs" style="inset:0"></div>
+      <div class="abs tcap" style="left:44px;bottom:30px">100% of penalties go to the players who showed up.</div>
+    </div>
+    <div id="f-t2" class="abs tile" style="left:160px;top:676px">
+      <div class="tglow" id="f-g2"></div>
+      <div class="abs poolcard" style="left:54px;top:36px"><div class="pcd">Oct 8 · UTC</div><div class="pcs">0 posts</div><div class="pca tnum" id="f-ra">120 SKR</div></div>
+      <div class="abs" style="left:330px;top:90px;width:120px;height:4px;border-radius:2px;background:var(--line)"><div id="f-rbar" style="height:100%;width:100%;background:var(--grad);transform-origin:0 50%"></div></div>
+      <div id="f-rarrow" class="abs" style="left:440px;top:74px">{arrow}</div>
+      <div class="abs poolcard" style="left:494px;top:36px"><div class="pcd">Oct 9 · UTC</div><div class="pcs">today's pool</div><div class="pca tnum" id="f-rb">+0 SKR</div></div>
+      <div id="f-rchip" class="abs chip brand" style="left:84px;top:190px;font-size:21px;padding:10px 18px">+120 SKR</div>
+      <div class="abs tcap" style="left:44px;bottom:30px">Nobody posted? The pool rolls over to the next day.</div>
+    </div>
+    <div id="f-t3" class="abs tile" style="left:976px;top:676px">
+      <div class="tglow" id="f-g3"></div>
+      <div class="abs" style="left:54px;top:44px;right:54px;height:110px">
+        <div class="tnode" id="f-n0" style="left:0">Request</div>
+        <div class="abs" style="left:150px;right:190px;top:24px;height:6px;border-radius:3px;background:var(--line)"><div id="f-wfill" style="height:100%;width:100%;border-radius:3px;background:var(--grad);transform-origin:0 50%"></div></div>
+        <div id="f-wcount" class="abs tnum" style="left:150px;right:190px;top:52px;text-align:center;font:700 34px/1 var(--display)">0 h</div>
+        <div class="tnode" id="f-n1" style="right:0">Unlocked</div>
+      </div>
+      <div id="f-home" class="abs chip ok" style="left:54px;top:148px;font-size:21px;padding:10px 18px">{home} Stake back in your wallet</div>
+      <div class="abs tcap" style="left:44px;bottom:30px">Cancel anytime before unlock. Missed days still count while you wait.</div>
+    </div>
+  </section>
+
+  <!-- 7 · SKR -->
+  <section class="scene" id="sc-skr">
+    <div id="k-kicker" class="abs kicker" style="left:160px;top:150px">05 · Why SKR</div>
+    <div id="k-h" class="abs h2" style="left:160px;top:200px;width:1600px">Real utility for <span class="g">SKR.</span></div>
+    <svg id="k-lines" class="abs" viewBox="0 0 1920 1080" width="1920" height="1080" style="left:0;top:0">
+      <path id="k-l0" d="M780 640 C 700 640, 700 640, 640 640" fill="none" stroke="#3a302a" stroke-width="2.5"/>
+      <path id="k-l1" d="M1140 560 C 1220 520, 1240 470, 1290 470" fill="none" stroke="#3a302a" stroke-width="2.5"/>
+      <path id="k-l2" d="M1140 720 C 1220 760, 1240 800, 1290 800" fill="none" stroke="#3a302a" stroke-width="2.5"/>
+    </svg>
+    <svg id="k-orbit" class="abs" viewBox="0 0 640 640" width="640" height="640" style="left:640px;top:320px">
+      <circle cx="320" cy="320" r="300" fill="none" stroke="#3a302a" stroke-width="2" stroke-dasharray="4 14"/>
+      <path d="M320 20 A300 300 0 0 1 620 320" fill="none" stroke="url(#k-og)" stroke-width="4" stroke-linecap="round"/>
+      <path d="M320 620 A300 300 0 0 1 20 320" fill="none" stroke="url(#k-og)" stroke-width="4" stroke-linecap="round"/>
+      <defs><linearGradient id="k-og" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F4C56F"/><stop offset="1" stop-color="#E94F75"/></linearGradient></defs>
+    </svg>
+    <div id="k-coinwrap" class="abs" style="left:780px;top:460px;width:360px;height:360px">
+      <div class="orbglow" style="inset:-90px"></div>
+      <div id="k-coin" class="abs" style="inset:0"></div>
+    </div>
+    <div id="k-c0" class="abs card kcard" style="left:160px;top:540px">
+      <div class="kic">{lock}</div><div class="kt">Hold &amp; lock</div><div class="ks">A daily reason to keep SKR staked in the vault.</div>
+    </div>
+    <div id="k-c1" class="abs card kcard" style="left:1290px;top:370px">
+      <div class="kic">{trend}</div><div class="kt">Consistency, not speculation</div><div class="ks">Rewards flow to the people who show up.</div>
+    </div>
+    <div id="k-c2" class="abs card kcard" style="left:1290px;top:700px">
+      <div class="kic">{at}</div><div class="kt">Identity with <span class="g">.skr</span></div><div class="ks">Your profile resolves the .skr name your wallet owns.</div>
+    </div>
+  </section>
+
+  <!-- 8 · Tech -->
+  <section class="scene" id="sc-tech">
+    <div id="t-kicker" class="abs kicker" style="left:160px;top:150px">06 · Under the hood</div>
+    <div id="t-h" class="abs h3" style="left:160px;top:196px;width:1600px">Built for Seeker. Secured by Solana.</div>
+    <svg id="t-edges" class="abs" viewBox="0 0 1920 1080" width="1920" height="1080" style="left:0;top:0">
+      <path id="t-e1" d="M330 462 L330 640" class="edge"/>
+      <path id="t-e2" d="M500 396 L790 396" class="edge"/>
+      <path id="t-e3" d="M1130 396 L1420 396" class="edge"/>
+      <path id="t-e4" d="M960 462 L960 640" class="edge"/>
+      <path id="t-e5" d="M1130 440 C 1290 440, 1270 706, 1420 706" class="edge"/>
+    </svg>
+    <div id="t-app" class="node" style="left:160px;top:330px"><div class="ni">{phone}</div><div><div class="nt">Moment app</div><div class="ns">Kotlin · CameraX</div></div></div>
+    <div id="t-wallet" class="node" style="left:160px;top:640px"><div class="ni">{wallet}</div><div><div class="nt">Your wallet</div><div class="ns">Mobile Wallet Adapter</div></div></div>
+    <div id="t-ks" class="node" style="left:790px;top:330px"><div class="ni">{server}</div><div><div class="nt">Keyserver</div><div class="ns">Rust · Axum · ONNX</div></div></div>
+    <div id="t-sol" class="node" style="left:1420px;top:330px"><div class="ni sol"><span class="solbars"><i></i><i></i><i></i></span></div><div><div class="nt">Solana</div><div class="ns">Anchor program</div></div></div>
+    <div id="t-pg" class="node" style="left:790px;top:640px"><div class="ni">{db}</div><div><div class="nt">PostgreSQL</div><div class="ns">Sessions · wrapped keys</div></div></div>
+    <div id="t-r2" class="node" style="left:1420px;top:640px"><div class="ni">{cloud}</div><div><div class="nt">Private R2</div><div class="ns">Encrypted packets only</div></div></div>
+    <div id="t-tags" class="abs" style="left:160px;top:478px;display:flex;gap:10px">
+      <div class="badge warm" id="t-tag0">Native Android</div><div class="badge warm" id="t-tag1">Seeker</div><div class="badge warm" id="t-tag2">EN · FR</div>
+    </div>
+    <div id="t-bsign" class="badge ok" style="left:200px;top:788px">{check} Signed · Ed25519</div>
+    <div id="t-bdev" class="badge ok" style="left:200px;top:478px">{eye} On-device check · ONNX</div>
+    <div id="t-bsol" class="badge ok" style="left:1460px;top:478px">{check} CheckIn.commitment</div>
+    <div id="t-bsol2" class="badge ok" style="left:1460px;top:478px">{check} check_in confirmed</div>
+    <div id="t-br2" class="badge warm" style="left:1460px;top:788px">{lock} AES-256-GCM blobs</div>
+    <div id="t-bks" class="badge warm" style="left:830px;top:478px">{block} No token transfers</div>
+    <div class="abs packet" id="t-pk1"></div>
+    <div class="abs packet" id="t-pk2"></div>
+    <div class="abs packet" id="t-pk3"></div>
+    <div id="t-d1" class="abs card dcard" style="left:160px;top:820px;width:620px;height:190px">
+      <div class="dlab">moment-manifest-v1</div>
+      <div class="code" id="t-code"></div>
+    </div>
+    <div id="t-d2" class="abs card dcard" style="left:820px;top:820px;width:560px;height:190px">
+      <div class="dlab">On-chain commitment</div>
+      <div class="code" style="margin-top:8px"><b>commitment</b> = <em>SHA-256</em>(manifest)</div>
+      <div id="t-hash" class="hashpill mono">3b7e 91c4 … 0f2a c9a1</div>
+    </div>
+    <div id="t-d3" class="abs card dcard" style="left:160px;top:820px;width:1220px;height:190px">
+      <div class="dlab">Private photo packet</div>
+      <div class="encrow">
+        <div class="encstep" id="t-x0"><div class="encic">{camera}</div><div><b>Sanitized JPEGs</b><span>EXIF stripped · ≤ 1,280 px</span></div></div>
+        <div class="encarr" id="t-xa0">{arrow}</div>
+        <div class="encstep" id="t-x1"><div class="encic">{lock}</div><div><b>AES-256-GCM</b><span>fresh key per post</span></div></div>
+        <div class="encarr" id="t-xa1">{arrow}</div>
+        <div class="encstep" id="t-x2"><div class="encic">{cloud}</div><div><b>blobRef</b><span>= SHA-256(blob)</span></div></div>
+      </div>
+    </div>
+    <div id="t-d4" class="abs card dcard" style="left:160px;top:820px;width:1220px;height:190px">
+      <div class="dlab">Keyserver checks before cosigning</div>
+      <div class="checks" id="t-checks"></div>
+    </div>
+    <div id="t-dim" class="abs" style="inset:0;background:rgba(13,10,8,.88)"></div>
+    <div id="t-trust1" class="abs h2" style="left:0;right:0;top:390px;text-align:center"><span class="okmark">{check}</span> It can authorize a post.</div>
+    <div id="t-trust2" class="abs h2" style="left:0;right:0;top:520px;text-align:center"><span class="nomark">{lock}</span> It can <span class="g">never</span> move your stake.</div>
+  </section>
+
+  <!-- 9 · Program -->
+  <section class="scene" id="sc-program">
+    <div id="g-kicker" class="abs kicker" style="left:160px;top:150px">07 · On-chain</div>
+    <div id="g-h" class="abs h2" style="left:160px;top:200px;width:1600px">One Anchor program enforces every rule.</div>
+    <div id="g-pid" class="abs chip mono" style="left:160px;top:300px;font-size:19px;padding:10px 18px;color:var(--muted)"><span class="soldot"></span>ANT4AF24p1io1pmdNFKd9RKMStLCFi6WGbu81QoGzqN6 · devnet</div>
+    <div id="g-cards"></div>
+    <div id="g-crank" class="abs card" style="left:160px;top:770px;width:376px;height:220px;padding:28px">
+      <div style="display:flex;gap:16px;align-items:center"><div class="crankic" id="g-crankic">{sync}</div><div><div style="font:700 28px/1.1 var(--display)">Crank</div><div class="muted" style="font:500 18px/1.3 var(--text);margin-top:4px">Permissionless</div></div></div>
+      <div class="muted" style="font:400 19px/1.4 var(--text);margin-top:18px">Anyone can settle. The keyserver runs it every quarter hour.</div>
+    </div>
+    <div id="g-pills"></div>
+  </section>
+
+  <!-- 10 · Outro -->
+  <section class="scene" id="sc-outro">
+    <div id="o-kicker" class="abs kicker" style="left:160px;top:150px"><span class="live"></span>Live on devnet · v0.3.1</div>
+    <div id="o-h" class="abs h2" style="left:160px;top:200px;width:1600px">Shipped, tested, running.</div>
+    <div id="o-grid"></div>
+    <div id="o-w0" class="abs bigword">Show up.</div>
+    <div id="o-w1" class="abs bigword">Capture.</div>
+    <div id="o-w2" class="abs bigword">Share.</div>
+    <div id="o-w3" class="abs bigword"><span class="g">Earn.</span></div>
+    <div id="o-logo" class="abs" style="left:840px;top:190px;width:240px;height:240px"></div>
+    <div id="o-word" class="abs" style="left:0;right:0;top:450px;text-align:center;font:800 170px/1.05 var(--display);letter-spacing:-.045em">Moment</div>
+    <div id="o-tag" class="abs h2" style="left:0;right:0;top:660px;text-align:center"><span class="g">One moment a day.</span></div>
+    <div id="o-url" class="abs" style="left:0;right:0;top:790px;text-align:center"><span class="chip mono" style="font-size:28px;padding:16px 30px">github.com/KlementXV/Moment</span></div>
+    <div id="o-foot" class="abs" style="left:0;right:0;top:890px;text-align:center;font:600 20px/1 var(--text);letter-spacing:.2em;text-transform:uppercase;color:var(--outline)">Built for Solana Mobile · CLOCK IN Hackathon</div>
+  </section>
+
+  <!-- chrome -->
+  <div class="layer" id="chrome">
+    <div class="abs" id="chrome-logo"><span id="chrome-mark"></span>Moment</div>
+    <div class="abs" id="chrome-tag">Solana Mobile · CLOCK IN</div>
+    <div class="abs" id="progress"><div id="progress-fill"></div></div>
+  </div>
+  <div class="layer" id="grain"></div>
+  <div class="layer" id="vignette"></div>
+  <div class="layer" id="fade"></div>
+</div>
+<script src="timeline.js"></script>
+<script src="engine.js"></script>
+<script src="art.js"></script>
+<script src="scenes.js"></script>
+</body>
+</html>

@@ -148,6 +148,7 @@ For an interface preview, the profile also provides an optional demo feed with i
 - [Tests, continuous integration, and GitHub Actions variables](docs/testing-and-ci.md)
 - [Keyserver configuration and API](keyserver/README.md)
 - [Kubernetes deployment](keyserver/helm/moment-keyserver/README.md)
+- [Hackathon film and its build pipeline](video/README.md)
 
 The CI builds and tests the program and backend, validates the Helm chart, and builds the devnet Android variant. Manual workflow runs provide a debug APK as a workflow artifact; version tags publish a signed devnet APK in GitHub Releases. The mainnet variant remains available for local builds but is excluded from CI until its deployment is ready. CI does not publish the keyserver image; [build it with Docker](keyserver/README.md#docker-image).
 

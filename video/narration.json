@@ -1,0 +1,91 @@
+{
+  "voice": "af_heart",
+  "speed": 1.0,
+  "defaultGap": 0.35,
+  "scenes": [
+    {
+      "id": "intro", "lead": 2.6, "tail": 1.2, "minDur": 9.5,
+      "lines": [
+        { "id": "this", "text": "This is Moment.", "gap": 0.5 },
+        { "id": "tag", "text": "One moment a day, for the Seeker community, powered by Solana and SKR." }
+      ]
+    },
+    {
+      "id": "problem", "lead": 0.5, "tail": 0.9,
+      "lines": [
+        { "id": "scroll", "text": "Social apps reward endless scrolling.", "gap": 0.45 },
+        { "id": "rarer", "text": "Moment rewards something rarer: showing up.", "gap": 0.55 },
+        { "id": "dual", "text": "Once a day, you capture what's in front of you, and yourself, in the same instant.", "gap": 0.45 },
+        { "id": "line", "text": "And you put your presence on the line." }
+      ]
+    },
+    {
+      "id": "ritual", "lead": 0.5, "tail": 1.6,
+      "lines": [
+        { "id": "wallet", "text": "Connect your wallet through Mobile Wallet Adapter.", "gap": 0.7 },
+        { "id": "stake", "text": "Stake at least five hundred SKR. It stays yours, locked in the program's vault.", "gap": 0.7 },
+        { "id": "capture", "text": "Take a photo of the scene, then a selfie.", "gap": 1.6 },
+        { "id": "publish", "text": "Review, sign, and publish.", "gap": 1.0 },
+        { "id": "feed", "text": "Your Moment unlocks today's community feed, and your streak grows." }
+      ]
+    },
+    {
+      "id": "decay", "lead": 0.5, "tail": 1.0,
+      "lines": [
+        { "id": "round", "text": "Now, the SKR economy. Every UTC day is a round.", "gap": 0.5 },
+        { "id": "miss", "text": "Miss one, and ten percent of your remaining stake is deducted.", "gap": 0.4 },
+        { "id": "seq", "text": "A thousand SKR becomes nine hundred, then eight hundred and ten.", "gap": 0.5 },
+        { "id": "month", "text": "Keep missing, and it keeps shrinking: after a month, barely four percent is left." }
+      ]
+    },
+    {
+      "id": "pool", "lead": 0.4, "tail": 1.6,
+      "lines": [
+        { "id": "fund", "text": "Those penalties fund that day's pool.", "gap": 0.5 },
+        { "id": "close", "text": "At six AM UTC the next morning, it closes, and it's split between everyone who posted, pro rata to their stake.", "gap": 0.6 },
+        { "id": "example", "text": "Stake fifteen hundred out of a three thousand total, and you take half the pool, added straight to your stake." }
+      ]
+    },
+    {
+      "id": "fair", "lead": 0.4, "tail": 1.2,
+      "lines": [
+        { "id": "mint", "text": "No tokens are minted to pay rewards, and there's no protocol fee.", "gap": 0.4 },
+        { "id": "forfeit", "text": "Every reward is SKR forfeited by someone who didn't show up.", "gap": 0.5 },
+        { "id": "rollover", "text": "If nobody posts, the pool rolls over to the next day.", "gap": 0.6 },
+        { "id": "exit", "text": "And when you're done, request a withdrawal: forty-eight hours later, your stake comes home." }
+      ]
+    },
+    {
+      "id": "skr", "lead": 0.4, "tail": 1.4,
+      "lines": [
+        { "id": "utility", "text": "For SKR, that means real utility:", "gap": 0.3 },
+        { "id": "list", "text": "a daily reason to hold and lock the token, rewards for consistency rather than speculation, and identity through .skr names.", "tts": "a daily reason to hold and lock the token, rewards for consistency rather than speculation, and identity through dot SKR names." }
+      ]
+    },
+    {
+      "id": "tech", "lead": 0.4, "tail": 1.2,
+      "lines": [
+        { "id": "app", "text": "Under the hood: a native Kotlin app, built for Seeker.", "gap": 0.5 },
+        { "id": "manifest", "text": "Your wallet signs a manifest of both photo hashes. Its SHA-256 becomes the on-chain commitment.", "tts": "Your wallet signs a manifest of both photo hashes. Its Sha two fifty-six becomes the on-chain commitment.", "gap": 0.5 },
+        { "id": "encrypt", "text": "Photos are stripped of metadata, then encrypted with AES-GCM.", "tts": "Photos are stripped of metadata, then encrypted with AES GCM.", "gap": 0.5 },
+        { "id": "moderation", "text": "An on-device model screens them. Then our Rust keyserver re-checks everything, and cosigns the check-in.", "gap": 0.5 },
+        { "id": "trust", "text": "It can authorize a post. It can never move your stake." }
+      ]
+    },
+    {
+      "id": "program", "lead": 0.4, "tail": 1.0,
+      "lines": [
+        { "id": "accounts", "text": "On chain, an Anchor program enforces every rule, across four accounts: Config, Profile, Day Pool, and Check-In.", "gap": 0.5 },
+        { "id": "crank", "text": "Settlement is permissionless: a crank settles missed days, rolls empty pools forward, and refunds rent from old check-ins." }
+      ]
+    },
+    {
+      "id": "outro", "lead": 0.4, "tail": 4.2,
+      "lines": [
+        { "id": "live", "text": "Moment is running on devnet today: Android app, Anchor program, Rust backend, tests, and CI.", "tts": "Moment is running on dev-net today: Android app, Anchor program, Rust backend, tests, and CI.", "gap": 0.6 },
+        { "id": "words", "text": "Show up. Capture. Share. Earn.", "gap": 0.8 },
+        { "id": "end", "text": "Moment. One moment a day." }
+      ]
+    }
+  ]
+}
