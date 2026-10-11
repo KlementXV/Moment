@@ -15,7 +15,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.klementxv.moment.BuildConfig
 import com.klementxv.moment.moderation.*
 import com.klementxv.moment.ChainState
 import com.klementxv.moment.capture.DraftCodec
@@ -87,7 +86,7 @@ internal fun CaptureReview(
     var caption by rememberSaveable(draft) { mutableStateOf("") }
     var confirmReview by remember(draft) { mutableStateOf(false) }
     val analysis = (moderation as? ModerationState.Ready)?.analysis
-    val gateOpen = moderation.allowsPublication(BuildConfig.DEBUG, reviewAcknowledged = true)
+    val gateOpen = moderation.allowsPublication(uncalibratedModerationAllowed, reviewAcknowledged = true)
     val publish: () -> Unit = {
         if (analysis?.decision == ModerationDecision.Review) confirmReview = true
         else onPublish(false, caption)
@@ -175,7 +174,7 @@ internal fun ModerationNotice(state: ModerationState, onRetry: () -> Unit, enabl
         Text(label, color = if (analysis?.decision == ModerationDecision.Accepted) Success else Danger,
             style = BodySm)
         if (analysis != null && !analysis.policy.calibrated) Text(
-            if (BuildConfig.DEBUG) tr(Message.ExperimentalDetectionUncalibratedThresholds)
+            if (uncalibratedModerationAllowed) tr(Message.ExperimentalDetectionUncalibratedThresholds)
             else tr(Message.PublishingPausedUntilDetectionIsCalibrated),
             color = Muted, style = LabelSm)
         if (state is ModerationState.Unavailable) TextButton(onClick = onRetry, enabled = enabled) {

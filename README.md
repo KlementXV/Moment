@@ -80,7 +80,7 @@ The current Android devnet defaults are:
 | Test mint decimals | 9 |
 | Keyserver | `https://moment-dev.noodler.cc` |
 
-The backend URL must be configured to publish and retrieve real Moments. A complete run with two physical wallets and a deployed R2 backend remains to be validated. Moderation thresholds are experimental and require calibration before production publication. The mainnet build variant is included, but a production deployment is still pending.
+The backend URL must be configured to publish and retrieve real Moments. A complete run with two physical wallets and a deployed R2 backend remains to be validated. Moderation thresholds are experimental: devnet builds publish with them and label them as uncalibrated in the app, while mainnet publication stays disabled until calibration. The mainnet build variant is included, but a production deployment is still pending.
 
 ## Run the Android app
 

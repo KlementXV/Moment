@@ -1,5 +1,6 @@
 package com.klementxv.moment.moderation
 
+import com.klementxv.moment.BuildConfig
 import com.klementxv.moment.capture.PhotoPair
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -48,9 +49,13 @@ sealed interface ModerationState {
     data class Ready(val analysis: ModerationAnalysis) : ModerationState
 }
 
-fun ModerationState.allowsPublication(debugBuild: Boolean, reviewAcknowledged: Boolean = false): Boolean {
+/** Debug builds and devnet demo builds may publish with experimental, uncalibrated thresholds. */
+val uncalibratedModerationAllowed: Boolean
+    get() = BuildConfig.DEBUG || BuildConfig.ALLOW_UNCALIBRATED_MODERATION
+
+fun ModerationState.allowsPublication(allowUncalibrated: Boolean, reviewAcknowledged: Boolean = false): Boolean {
     val analysis = (this as? ModerationState.Ready)?.analysis ?: return false
-    if (!analysis.policy.calibrated && !debugBuild) return false
+    if (!analysis.policy.calibrated && !allowUncalibrated) return false
     return when (analysis.decision) {
         ModerationDecision.Accepted -> true
         ModerationDecision.Review -> reviewAcknowledged

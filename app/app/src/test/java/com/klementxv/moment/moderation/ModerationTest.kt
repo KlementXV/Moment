@@ -1,5 +1,6 @@
 package com.klementxv.moment.moderation
 
+import com.klementxv.moment.BuildConfig
 import com.klementxv.moment.capture.PhotoPair
 import kotlinx.coroutines.*
 import org.junit.Assert.*
@@ -23,6 +24,11 @@ class ModerationTest {
         assertFalse(ready.allowsPublication(false, true))
         assertTrue(ready.allowsPublication(true))
         assertTrue(ModerationState.Ready(ready.analysis.copy(policy = policy.copy(calibrated = true))).allowsPublication(false))
+    }
+
+    @Test fun only_devnet_builds_publish_with_uncalibrated_thresholds() {
+        assertEquals(BuildConfig.NETWORK == "devnet", BuildConfig.ALLOW_UNCALIBRATED_MODERATION)
+        assertEquals(BuildConfig.DEBUG || BuildConfig.NETWORK == "devnet", uncalibratedModerationAllowed)
     }
 
     @Test fun review_needs_acknowledgement_and_block_cannot_be_overridden() {

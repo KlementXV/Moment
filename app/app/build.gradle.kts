@@ -81,6 +81,8 @@ android {
                 buildConfigField("String", "SKR_MINT", "\"${value("skrMint")}\"")
                 buildConfigField("int", "SKR_DECIMALS", decimals)
                 buildConfigField("String", "BACKEND_URL", "\"${value("backendUrl")}\"")
+                // Devnet demo builds publish with the experimental thresholds; mainnet waits for calibration.
+                buildConfigField("boolean", "ALLOW_UNCALIBRATED_MODERATION", "${network == "devnet"}")
             }
         }
     }

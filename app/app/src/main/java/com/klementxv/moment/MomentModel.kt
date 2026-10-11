@@ -407,7 +407,7 @@ class MomentModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     if (post == null) {
                         val photos = draft ?: error("Prenez les deux photos avant de publier.")
-                        check(moderation.allowsPublication(BuildConfig.DEBUG, reviewAcknowledged)) {
+                        check(moderation.allowsPublication(uncalibratedModerationAllowed, reviewAcknowledged)) {
                             tr(Message.PhotoChecksMustFinishAndAllowPublishing)
                         }
                         val manifest = PostManifest.of(BuildConfig.NETWORK, programId.bytes, owner.bytes, day, photos.rear, photos.front)
